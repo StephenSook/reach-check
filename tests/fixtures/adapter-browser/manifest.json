@@ -1,0 +1,10 @@
+{
+  "name": "adapter-browser",
+  "description": "An adapter step with no type key, plus browser steps.",
+  "metadata": {"runtime_dependencies": {"host_tools": []}, "requires_endpoints": ["adapter/example"]},
+  "steps": {
+    "call_api": {"endpoint": "adapter/example", "method": "get_thing", "params": {"id": "1"}},
+    "open_page": {"type": "browser.navigate", "url": "https://example.com"},
+    "read_page": {"type": "browser.extract", "slice": "headings", "depends_on": ["open_page"]}
+  }
+}

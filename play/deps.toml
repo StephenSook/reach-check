@@ -1,0 +1,27 @@
+schema_version = 1
+
+[[tools]]
+id = "python3"
+command = "python3"
+required = true
+
+[[tools.install]]
+manager = "brew"
+package = "python@3"
+
+[[tools.install]]
+manager = "apt"
+package = "python3"
+
+[[tools.install]]
+manager = "system"
+notes = "python3 on PATH. Every step body is standard library only and runs on 3.9 and newer."
+
+[[tools]]
+id = "rote"
+command = "rote"
+required = false
+
+[[tools.install]]
+manager = "system"
+notes = "Optional. Only the rote_verdict step uses it, to report rote's own eligibility verdict beside this one. Without it that column reads unknown and the run still succeeds."

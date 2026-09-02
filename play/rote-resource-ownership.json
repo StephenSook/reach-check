@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "resources": [
+    {
+      "path": "_rote_python_c.py",
+      "sha256": "847c71c8c6c1aa6a3cd994226210286738eca1bcd666533d1497da751cb7911c"
+    },
+    {
+      "path": "host_facts.py",
+      "sha256": "cbaecf4bf3732ad7558f5f3958e1c16f6a1b4e32d74d5e7986faaaaf0927fbdd"
+    },
+    {
+      "path": "reach_analysis.py",
+      "sha256": "7370091b8bca6be0523c61f7ae2ae27eac68541031332b30693a3905ed673ab8"
+    },
+    {
+      "path": "rote_verdict.py",
+      "sha256": "69797194632c703068e2cdefcb6f2a9b59b21629601637e09ae561898cdb0508"
+    }
+  ]
+}

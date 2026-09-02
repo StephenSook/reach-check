@@ -1,0 +1,18 @@
+schema_version = 1
+
+[[tools]]
+id = "python3"
+command = "python3"
+required = true
+
+[[tools.install]]
+manager = "brew"
+package = "python@3"
+
+[[tools.install]]
+manager = "apt"
+package = "python3"
+
+[[tools.install]]
+manager = "system"
+notes = "python3 on PATH. Both steps are standard library only and run on 3.9 and newer."

@@ -1,0 +1,11 @@
+{
+  "name": "shell-nested",
+  "description": "A shell body that writes inside cwd and nests a python interpreter.",
+  "metadata": {"runtime_dependencies": {"host_tools": [{"id": "sh", "command": "sh", "required": true}]}},
+  "steps": {
+    "probe": {
+      "type": "process.exec",
+      "argv": ["sh", "-c", "sleep 1; mkdir -p out; python3 -c 'import json,platform; print(platform.machine())' | tee out/host.json"]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.rote-flow-lint.json
+.rote-release.lock
+.permissions.json
+.DS_Store
+._*
+*.log
