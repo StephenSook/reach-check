@@ -1,0 +1,1 @@
+{"name": "write-targets", "description": "Every write target must be recorded with the right scope.", "metadata": {"runtime_dependencies": {"host_tools": [{"id": "sh", "command": "sh", "required": true}]}}, "steps": {"probe": {"type": "process.exec", "argv": ["sh", "@resource{writes.sh}"]}}}

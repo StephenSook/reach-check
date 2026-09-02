@@ -1,0 +1,1 @@
+{"name": "embedded-bodies", "description": "A shell body embedding a python body, and a heredoc.", "metadata": {"runtime_dependencies": {"host_tools": [{"id": "sh", "command": "sh", "required": true}]}}, "steps": {"probe": {"type": "process.exec", "argv": ["sh", "@resource{outer.sh}"]}, "viasub": {"type": "process.exec", "argv": ["python3", "@resource{viasub.py}"]}}}

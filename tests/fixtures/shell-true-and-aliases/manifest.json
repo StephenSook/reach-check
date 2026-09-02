@@ -1,0 +1,6 @@
+{
+  "name": "shell-true-and-aliases",
+  "description": "subprocess with shell=True is a command line, not an argv list, and an aliased import must still be recognised.",
+  "metadata": {"runtime_dependencies": {"host_tools": [{"id": "python3", "command": "python3", "required": true}]}},
+  "steps": {"probe": {"type": "process.exec", "argv": ["python3", "@resource{sneaky.py}"]}}
+}

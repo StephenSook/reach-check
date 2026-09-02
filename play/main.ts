@@ -3,11 +3,11 @@
  * @rote-frontmatter
  * ---
  * name: reach-check
- * description: See what a Play actually reaches on this machine before you publish it or run it. rote play inspect shows what a Play declares and resolves those declarations against your host. This reads the step bodies themselves, follows sh -c, python3 -c and @resource files, and reports the executables, imports, adapters, browser steps, environment variables and writes they really touch, together with which of them are missing here. It never runs, imports, pulls or writes anything.
+ * description: See what a Play actually reaches on this machine before you publish it or run it. rote play inspect shows what a Play declares and resolves those declarations against your host. This reads the step bodies themselves, follows sh -c, python3 -c and @resource files, and reports the executables, imports, adapters, browser steps, environment variables and writes they really touch, together with which of them are missing here. It never runs, imports or pulls the Play it reads, and it writes nothing. The one subprocess it runs is rote play inspect, to report rote's own verdict beside this one, and offline=true skips it.
  * provenance:
  *   author: sookra <stephensookra@gmail.com>
  * metadata:
- *   version: 0.1.0
+ *   version: 0.2.0
  *   rote_version: 0.78.0
  *   status: released
  *   kind: atomic
@@ -62,6 +62,7 @@
  *     - '@resource{rote_verdict.py}'
  *     - $play
  *     - $offline
+ *     - $flows_root
  * ---
  */
 
@@ -180,6 +181,17 @@ if (count === 0) {
     if (dyn.length > 0) detail.push(`- \`${ref}\` builds ${dyn.length} call target(s) at run time, which cannot be resolved by reading: ${dyn.join(", ")}.`);
     const mm = list(p.missing_modules);
     if (mm.length > 0) detail.push(`- \`${ref}\` imports module(s) not installed here: ${mm.join(", ")}.`);
+    // A body this tool could not read must be named. Reporting nothing for it would let a
+    // package look clean when it was simply never analysed.
+    const un = Array.isArray(p.unanalysed_bodies)
+      ? (p.unanalysed_bodies as Array<Record<string, unknown>>)
+      : [];
+    for (const u of un) {
+      detail.push(
+        `- \`${ref}\` step \`${String(u.step ?? "?")}\`: ${String(u.resource ?? "body")} was not read, ${String(u.reason ?? "reason unknown")}.`,
+      );
+    }
+    for (const n of list(p.notes)) detail.push(`- \`${ref}\`: ${n}`);
   }
   if (detail.length > 0) {
     lines.push("");
@@ -196,7 +208,7 @@ if (hp) {
   );
 }
 lines.push(
-  "`rote play inspect` reports what a Play declares and resolves that against this host. This reports what its steps reach. Reachability is evidence, not a guarantee of safety, and this never runs, imports, pulls or writes anything.",
+  "`rote play inspect` reports what a Play declares and resolves that against this host. This reports what its steps reach. Reachability is evidence, not a guarantee of safety. This never runs, imports or pulls the Play it reads and writes nothing; the only subprocess it runs is `rote play inspect` itself, which `offline=true` skips.",
 );
 if (notes.length > 0) {
   lines.push("");

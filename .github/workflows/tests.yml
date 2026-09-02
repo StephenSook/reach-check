@@ -17,5 +17,38 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Compile every module on this interpreter
+        run: python3 -m compileall -q play/resources tests
       - name: Run the extractor tests
         run: python3 tests/test_reach.py
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install ruff
+        run: pip install ruff==0.14.2
+      - name: Lint
+        run: ruff check play/resources tests --target-version py39
+      - name: Format check
+        run: ruff format --check play/resources tests
+
+  guarantees:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The extractor must never execute or import what it reads
+        run: |
+          if grep -nE '\b(exec|eval|__import__|importlib\.import_module)\(' play/resources/reach_analysis.py; then
+            echo "FAIL: the extractor must not execute or import analysed code"
+            exit 1
+          fi
+          echo "ok: no execution primitives in the extractor"
+      - name: find_spec must only ever see a top-level name
+        run: |
+          grep -q "split('.')\[0\]" play/resources/reach_analysis.py || {
+            echo "FAIL: imports are not reduced to their top-level name"; exit 1; }
+          echo "ok: imports reduced to top-level names"

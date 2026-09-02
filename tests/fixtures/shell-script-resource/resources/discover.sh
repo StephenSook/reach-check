@@ -12,3 +12,6 @@ fi
 for f in *.txt; do
   test -f "$f" && grep -q needle "$f"
 done
+
+echo marker > /tmp/reach-check-fixture-outside
+echo local > out/local.log

@@ -1,0 +1,15 @@
+# Fixtures are deliberately odd test INPUT, not source, and _rote_python_c.py is rote's own
+# generated exec shim that ships verbatim inside the package. Neither is ours to restyle.
+target-version = "py39"
+line-length = 120
+exclude = [
+  "tests/fixtures",
+  "examples-pulled-play-inventory",
+  "play/resources/_rote_python_c.py",
+]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "C4", "SIM", "RUF"]
+ignore = [
+  "E741",   # ambiguous variable name: `l` is fine for one line of a lexer loop
+]

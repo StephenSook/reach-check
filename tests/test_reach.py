@@ -9,6 +9,7 @@ nothing installed and no packages pulled. Run it with:
 It is deliberately dependency free and runs on python 3.9 and newer, which is the
 floor a stranger on a stock macOS actually has.
 """
+
 import importlib.util
 import os
 import sys
@@ -42,18 +43,28 @@ def analyze(name):
 
 
 print("reach extractor, hermetic fixtures")
-print("python", sys.version.split()[0], "| stdlib via",
-      "api" if hasattr(sys, "stdlib_module_names") else "sysconfig-fallback")
+print(
+    "python",
+    sys.version.split()[0],
+    "| stdlib via",
+    "api" if hasattr(sys, "stdlib_module_names") else "sysconfig-fallback",
+)
 print()
 
 print("loop-variable: a binary reached only through a python loop variable")
 r = analyze("loop-variable")
 check("finds both tools bound in a module-level list", {"alpha-tool", "beta-tool"} <= set(r["reached"]), r["reached"])
-check("reports them as undeclared", {"alpha-tool", "beta-tool"} <= set(r["undeclared_but_reached"]), r["undeclared_but_reached"])
+check(
+    "reports them as undeclared",
+    {"alpha-tool", "beta-tool"} <= set(r["undeclared_but_reached"]),
+    r["undeclared_but_reached"],
+)
 check("still records the declared interpreter", "python3" in r["reached"], r["reached"])
-check("an argv list bound to a name yields the command, not its arguments",
-      "listing-tool" in r["reached"] and not any(c in r["reached"] for c in ("-axo", "pid=,rss=")),
-      r["reached"])
+check(
+    "an argv list bound to a name yields the command, not its arguments",
+    "listing-tool" in r["reached"] and not any(c in r["reached"] for c in ("-axo", "pid=,rss=")),
+    r["reached"],
+)
 
 print("shell-nested: a shell body that writes and nests an interpreter")
 r = analyze("shell-nested")
@@ -65,10 +76,16 @@ check("invents no write outside the working directory", r["writes_outside_cwd"] 
 print("resource-body: a body behind rote's exec shim")
 r = analyze("resource-body")
 check("follows the @resource reference to the real body", "gamma-tool" in r["reached"], r["reached"])
-check("reads environment variables by name", {"FIXTURE_TOKEN", "FIXTURE_HOME"} <= set(r["env_vars_read"]), r["env_vars_read"])
-check("does not attribute the shim's own imports to the Play",
-      "_frozen_importlib" not in r["third_party_imports"] + r.get("sibling_modules", []),
-      r["third_party_imports"])
+check(
+    "reads environment variables by name",
+    {"FIXTURE_TOKEN", "FIXTURE_HOME"} <= set(r["env_vars_read"]),
+    r["env_vars_read"],
+)
+check(
+    "does not attribute the shim's own imports to the Play",
+    "_frozen_importlib" not in r["third_party_imports"] + r.get("sibling_modules", []),
+    r["third_party_imports"],
+)
 
 print("adapter-browser: non-process steps are reach too")
 r = analyze("adapter-browser")
@@ -85,35 +102,108 @@ check("reads declared tools from deps.toml", r["declared"] == ["python3"], r["de
 print("nested-resources: sibling modules in a subdirectory")
 r = analyze("nested-resources")
 check("follows a resource in a subdirectory", "nested-tool" in r["reached"], r["reached"])
-check("treats a nested sibling module as local, not missing",
-      r["missing_modules"] == [] and "helper" in r.get("sibling_modules", []),
-      (r["missing_modules"], r.get("sibling_modules")))
+check(
+    "treats a nested sibling module as local, not missing",
+    r["missing_modules"] == [] and "helper" in r.get("sibling_modules", []),
+    (r["missing_modules"], r.get("sibling_modules")),
+)
 
 print("shell-script-resource: a real script, not a one-liner")
 r = analyze("shell-script-resource")
 check("finds the real commands", {"shell-only-tool", "find", "grep"} <= set(r["reached"]), r["reached"])
-check("reports no shell grammar words",
-      not ({"if", "then", "fi", "else", "for", "do", "done", "{", "}"} & set(r["reached"])), r["reached"])
-check("reports no shell builtins",
-      not ({"echo", "printf", "set", "exit", "test"} & set(r["reached"])), r["reached"])
-check("reports no assignments or globs",
-      not any(("=" in c) or ("*" in c) for c in r["reached"]), r["reached"])
+check(
+    "reports no shell grammar words",
+    not ({"if", "then", "fi", "else", "for", "do", "done", "{", "}"} & set(r["reached"])),
+    r["reached"],
+)
+check("reports no shell builtins", not ({"echo", "printf", "set", "exit", "test"} & set(r["reached"])), r["reached"])
+check("reports no assignments or globs", not any(("=" in c) or ("*" in c) for c in r["reached"]), r["reached"])
 check("does not report a for-loop variable as a command", "f" not in r["reached"], r["reached"])
+check(
+    "a redirect to an absolute path is outside the working directory",
+    any(w["target"] == "/tmp/reach-check-fixture-outside" for w in r["writes_outside_cwd"]),
+    r["writes_outside_cwd"],
+)
+check(
+    "a redirect to a relative path stays inside the working directory",
+    any(w["target"] == "out/local.log" for w in r["writes_cwd"]),
+    r["writes_cwd"],
+)
 
 print("escaping-resource: a package that points outside itself")
 r = analyze("escaping-resource")
-check("refuses to read outside the package",
-      any("escapes the package" in u.get("reason", "") for u in r["unanalysed_bodies"]),
-      r["unanalysed_bodies"])
+check(
+    "refuses to read outside the package",
+    any("escapes the package" in u.get("reason", "") for u in r["unanalysed_bodies"]),
+    r["unanalysed_bodies"],
+)
 check("reads no content from the escape target", "root" not in r["reached"], r["reached"])
 
 print("javascript-body: a language this tool does not read")
 r = analyze("javascript-body")
-check("says plainly that the body was not analysed",
-      any("javascript" in u.get("reason", "") for u in r["unanalysed_bodies"]),
-      r["unanalysed_bodies"])
-check("does not silently claim there is no reach",
-      len(r["unanalysed_bodies"]) >= 1, r["unanalysed_bodies"])
+check(
+    "says plainly that the body was not analysed",
+    any("javascript" in u.get("reason", "") for u in r["unanalysed_bodies"]),
+    r["unanalysed_bodies"],
+)
+check("does not silently claim there is no reach", len(r["unanalysed_bodies"]) >= 1, r["unanalysed_bodies"])
+
+print("python-writes: writes performed from a Python body")
+r = analyze("python-writes")
+cwd_targets = [w["target"] for w in r["writes_cwd"]]
+out_targets = [w["target"] for w in r["writes_outside_cwd"]]
+check("finds a write inside the working directory", "out/report.json" in cwd_targets, cwd_targets)
+check("finds a directory creation inside the working directory", "out/nested" in cwd_targets, cwd_targets)
+check("finds a copy that leaves the working directory", "/etc/somewhere-else" in out_targets, out_targets)
+check("finds a pathlib write to a home path", "~/.ssh/authorized_keys" in out_targets, out_targets)
+check(
+    "does not treat a read-mode open as a write",
+    not any(t == "read-only.txt" for t in cwd_targets + out_targets),
+    cwd_targets + out_targets,
+)
+
+print("shell-true-and-aliases: a command line, and imports under another name")
+r = analyze("shell-true-and-aliases")
+check("shell=True is read as a command line, not an argv list", {"curl", "sh"} <= set(r["reached"]), r["reached"])
+check("an aliased subprocess import is still recognised", "aliased-tool" in r["reached"], r["reached"])
+check("an aliased os import is still recognised for env vars", "ALIASED_ENV" in r["env_vars_read"], r["env_vars_read"])
+
+print("malformed-manifest: a hostile package must not take the run down")
+r = analyze("malformed-manifest")
+check("degrades instead of raising", isinstance(r, dict) and r.get("ref") == "malformed-manifest", r)
+check("says why it could not be read", len(r.get("notes", [])) > 0, r.get("notes"))
+
+print("embedded-bodies: a body inside a body, and a heredoc")
+r = analyze("embedded-bodies")
+check("finds the outer shell commands", {"head-tool", "tail-tool"} <= set(r["reached"]), r["reached"])
+check("reads the embedded python body", "embedded-tool" in r["reached"], r["reached"])
+check(
+    "invents nothing from python source lines",
+    not ({"import", "subprocess.run", "os.path.join"} & set(r["reached"])),
+    r["reached"],
+)
+check(
+    "invents nothing from heredoc text",
+    not ({"MARK", "some", "heredoc", "body", "words"} & set(r["reached"])),
+    r["reached"],
+)
+check("recurses into subprocess.run(['sh', '-c', ...])", "via-subprocess-tool" in r["reached"], r["reached"])
+
+print("write-targets: every target, with the right scope")
+r = analyze("write-targets")
+out = [w["target"] for w in r["writes_outside_cwd"]]
+cwd = [w["target"] for w in r["writes_cwd"]]
+check("records a removal target that leaves the working directory", "/etc/fixture-thing" in out, out)
+check("still records the local target of the same command", "out" in cwd, cwd)
+check("reads a key=value write target", "/etc/fixture-passwd" in out, out)
+pairs_cwd = [(w["command"], w["target"]) for w in r["writes_cwd"]]
+pairs_out = [(w["command"], w["target"]) for w in r["writes_outside_cwd"]]
+check(
+    "does not report the same write twice",
+    len(pairs_cwd) == len(set(pairs_cwd)) and len(pairs_out) == len(set(pairs_out)),
+    (pairs_cwd, pairs_out),
+)
+check("a device sink is not reported as a filesystem write", "/dev/zero" not in out, out)
 
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))

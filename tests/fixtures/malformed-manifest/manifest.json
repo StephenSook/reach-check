@@ -1,0 +1,1 @@
+{"name": "malformed-manifest", "description": "steps is a list, which must degrade rather than crash the run.", "metadata": {"runtime_dependencies": {"host_tools": "not-a-list"}}, "steps": [1, 2, 3]}
