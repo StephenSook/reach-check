@@ -89,6 +89,10 @@ reported. **A false claim about someone else's package is the worst failure this
 - It does not read JavaScript. Those bodies are named in `unanalysed_bodies` and printed in the report.
 - It cannot resolve a call target assembled at run time. Those are reported by name rather than dropped.
 - It does not model platform branching, and it cannot see state a previous run left behind.
+- It reads code, not execution. A call inside `if False:` is still reported as reached, and a name
+  reassigned to a computed value keeps its earlier constant. Both are deliberate: this reports what
+  a package contains, and narrowing that to what a particular run would execute is a different and
+  much harder question.
 - Reachability is evidence and uncertainty, never a guarantee of safety.
 
 ## Verification
@@ -97,7 +101,7 @@ reported. **A false claim about someone else's package is the worst failure this
 python3 tests/test_reach.py
 ```
 
-52 checks against fixture packages, so the suite needs nothing installed and no packages pulled. CI
+57 checks against fixture packages, so the suite needs nothing installed and no packages pulled. CI
 runs it on python 3.9 and 3.13, on Linux and macOS.
 
 Most of those checks exist because the tool was proved wrong and then fixed. Running it against 20

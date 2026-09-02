@@ -1,0 +1,1 @@
+{"name": "wrapped-commands", "description": "Command substitutions and forwarding wrappers still run a program.", "metadata": {"runtime_dependencies": {"host_tools": [{"id": "sh", "command": "sh", "required": true}]}}, "steps": {"probe": {"type": "process.exec", "argv": ["sh", "@resource{wrapped.sh}"]}}}

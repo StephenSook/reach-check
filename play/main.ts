@@ -7,7 +7,7 @@
  * provenance:
  *   author: sookra <stephensookra@gmail.com>
  * metadata:
- *   version: 0.2.0
+ *   version: 0.2.1
  *   rote_version: 0.78.0
  *   status: released
  *   kind: atomic

@@ -348,6 +348,22 @@ SHELL_BUILTINS = {
     "[",
 }
 _CMD_OK = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+-]*$")
+# These run another program. Reporting only the wrapper hides what actually runs.
+FORWARDING = {
+    "command",
+    "exec",
+    "env",
+    "nohup",
+    "time",
+    "xargs",
+    "sudo",
+    "doas",
+    "nice",
+    "stdbuf",
+    "timeout",
+    "setsid",
+    "ionice",
+}
 _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
@@ -699,6 +715,19 @@ def _unescaped_quotes(line):
     return out
 
 
+_CMDSUB_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+
+
+def _scan_substitutions(src, reach, origin, depth):
+    """A command substitution runs a command. Read what is inside it."""
+    if depth > 4:
+        return
+    for mo in _CMDSUB_RE.finditer(src):
+        inner = mo.group(1) if mo.group(1) is not None else mo.group(2)
+        if inner and inner.strip():
+            scan_shell(inner, reach, origin + ">substitution", depth + 1)
+
+
 def _tokens(text):
     """Tokenise one chunk of shell. Returns None when the chunk cannot be lexed."""
     try:
@@ -744,7 +773,19 @@ def _scan_tokens(toks, reach, origin, depth):
             continue
         head = seg[idx]
         seg = seg[idx:]
-        if not plausible_command(head):
+        # Step through wrappers such as `command curl ...` or `env FOO=1 curl ...` so the
+        # program that actually runs is the one reported.
+        hops = 0
+        while seg and os.path.basename(seg[0]) in FORWARDING and len(seg) > 1 and hops < 4:
+            wrapper = os.path.basename(seg[0])
+            if plausible_command(wrapper):
+                reach.execs.add(wrapper)  # env and sudo are real binaries; command and exec are not
+            seg = seg[1:]
+            while seg and (seg[0].startswith("-") or _ASSIGN_RE.match(seg[0])):
+                seg = seg[1:]
+            head = seg[0] if seg else ""
+            hops += 1
+        if not seg or not plausible_command(head):
             continue
         base = os.path.basename(head)
         reach.execs.add(base)
@@ -775,6 +816,7 @@ def scan_shell(src, reach, origin, depth=0):
     # treats a newline as ordinary whitespace: reading it whole merges every line into one
     # segment, which loses every command after the first and makes the first command appear to
     # write to every path in the script.
+    _scan_substitutions(src, reach, origin, depth)
     if "\n" not in src:
         whole = _tokens(src)
         if whole is not None:

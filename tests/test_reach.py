@@ -211,6 +211,14 @@ all_mods = r["third_party_imports"] + r.get("sibling_modules", []) + r["missing_
 check("no dotted name survives to the module check", not any("." in mo for mo in all_mods), all_mods)
 check("dotted stdlib imports resolve without being reported missing", r["missing_modules"] == [], r["missing_modules"])
 
+print("wrapped-commands: substitutions and forwarding wrappers")
+r = analyze("wrapped-commands")
+check("reads inside a command substitution", "subst-tool" in r["reached"], r["reached"])
+check("reads inside backticks", "backtick-tool" in r["reached"], r["reached"])
+check("follows a forwarding builtin to the real command", "fwd-tool" in r["reached"], r["reached"])
+check("follows env past its assignments", "env-tool" in r["reached"], r["reached"])
+check("does not report the forwarding builtin itself", not ({"command", "exec"} & set(r["reached"])), r["reached"])
+
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:
