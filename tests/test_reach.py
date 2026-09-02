@@ -340,6 +340,40 @@ check("an array assignment does not swallow the next command", "git" in _c, sort
 _c = shell_execs("deploy() {\n  git push\n}\n")
 check("a function definition does not swallow its body", "git" in _c, sorted(_c))
 
+
+# Adversarial cases for the comment stripper and the case-label cut. Each one is a way
+# the two could eat a real command, which is the failure mode that matters most here.
+print()
+print("shell reading, adversarial")
+
+_hazards = [
+    ("a # inside a parameter expansion is not a comment", "base=${FILE#*/}\ngit status\n", "git"),
+    ("a ## inside a parameter expansion is not a comment", "base=${FILE##*/}\ngit status\n", "git"),
+    ("a URL fragment is not a comment", "curl https://example.com/page#section\n", "curl"),
+    ("an escaped hash is not a comment", "echo \\# ; git status\n", "git"),
+    ("a hash inside single quotes is not a comment", "echo 'a # b'\ngit status\n", "git"),
+    ("a hash inside double quotes is not a comment", 'echo "a # b"\ngit status\n', "git"),
+    ("arithmetic parens do not cut the line", "y=$((1 + 2))\ngit status\n", "git"),
+    ("process substitution does not cut the line", "diff <(sort a) <(sort b)\ngit status\n", "git"),
+    ("a paren inside a quoted argument does not cut the line", 'grep "foo)" file\ngit status\n', "git"),
+    ("a multi-line subshell does not lose its body", "(\n  cd /tmp\n  git status\n)\n", "git"),
+    (
+        "a case fallthrough does not lose the next branch",
+        'case "$x" in\n  a) true ;;&\n  b) git status ;;\nesac\n',
+        "git",
+    ),
+    ("a command after esac is still read", 'case "$x" in\n  a) true ;;\nesac\ngit status\n', "git"),
+    ("a comment line before a real command does not eat it", "# note\ngit status\n", "git"),
+    ("a trailing comment does not eat its own line", "git status  # check the tree\n", "git"),
+]
+for _label, _body, _want in _hazards:
+    _c = shell_execs(_body)
+    check(_label, _want in _c, sorted(_c))
+
+# The stripper must not disturb an embedded python body.
+_c = shell_execs("python3 -c 'import os\nprint(os.getcwd())'\n")
+check("an embedded python body is still read as python", "python3" in _c, sorted(_c))
+
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:
