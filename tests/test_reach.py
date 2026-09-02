@@ -288,6 +288,58 @@ _cases = [
 for _label, _steps, _want in _cases:
     check(_label, (len(mod.portability_paths(_steps)) > 0) == _want, mod.portability_paths(_steps))
 
+
+# ---------------------------------------------------------------------------
+# Shell reading. These three cases came from running the tool over other people's
+# published Plays, where a false positive is worse than a miss. Each has a negative
+# control so the fix cannot be a blanket ban that silences real commands.
+def shell_execs(body):
+    r = mod.Reach()
+    mod.scan_shell(body, r, "test")
+    return set(r.execs)
+
+
+print()
+print("shell reading")
+
+_c = shell_execs("# collect `docker-compose.prod.yml` and `compose.override.yml` too\nfind . -name x\n")
+check(
+    "a backtick inside a comment is not a command",
+    "docker-compose.prod.yml" not in _c and "compose.override.yml" not in _c,
+    sorted(_c),
+)
+check("the real command beside that comment is still read", "find" in _c, sorted(_c))
+
+_c = shell_execs("x=`curl -s https://example.com`\n")
+check("a backtick substitution outside a comment is still read", "curl" in _c, sorted(_c))
+
+_c = shell_execs('find . -name x 2>/dev/null | LC_ALL=C sort -u >"$found"\n')
+check("a redirected file descriptor is not a command", "2" not in _c, sorted(_c))
+check("commands around that redirect are still read", "find" in _c and "sort" in _c, sorted(_c))
+
+# The real-world shape: a multi-line find whose continuation line begins with the redirect.
+_c = shell_execs('find . \\\n  -name x \\\n2>/dev/null | LC_ALL=C sort -u >"$found"\n')
+check("a continuation line starting with a redirect is not a command", "2" not in _c, sorted(_c))
+check("the pipeline on that continuation line is still read", "sort" in _c, sorted(_c))
+
+_c = shell_execs("7z x archive.zip\n")
+check("a real command starting with a digit is still read", "7z" in _c, sorted(_c))
+_c = shell_execs("2to3 -w file.py\n")
+check("2to3 is still read", "2to3" in _c, sorted(_c))
+
+_c = shell_execs('case "$flag" in\n  true|1|yes|y) git status ;;\n  *) echo no ;;\nesac\n')
+check("a case label alternation is not a list of commands", not ({"1", "yes", "y", "true"} & _c), sorted(_c))
+check("the command inside a case branch is still read", "git" in _c, sorted(_c))
+
+_c = shell_execs("(cd /tmp && git status)\n")
+check("a subshell close paren is not a case label", "git" in _c, sorted(_c))
+
+_c = shell_execs("arr=(a b c)\ngit status\n")
+check("an array assignment does not swallow the next command", "git" in _c, sorted(_c))
+
+_c = shell_execs("deploy() {\n  git push\n}\n")
+check("a function definition does not swallow its body", "git" in _c, sorted(_c))
+
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:

@@ -378,10 +378,15 @@ def plausible_command(tok):
         return False
     if "=" in tok or tok.startswith("-") or tok.startswith("$"):
         return False
+    # `2>/dev/null` lexes to a bare `2`, and a line that begins with a redirect then puts
+    # that digit in the command position. A real command can start with a digit (7z, 2to3)
+    # but is never only digits.
+    if tok.isdigit():
+        return False
     if any(ch in tok for ch in "*?[]{}()<>|&;`\"'" + chr(92)):
         return False
     base = os.path.basename(tok)
-    if base in SHELL_BUILTINS or base in SHELL_KEYWORDS:
+    if base in SHELL_BUILTINS or base in SHELL_KEYWORDS or base.isdigit():
         return False
     return bool(_CMD_OK.match(base))
 
@@ -715,6 +720,50 @@ def _unescaped_quotes(line):
     return out
 
 
+def _strip_comments(src):
+    """Remove shell comments, quote aware.
+
+    The per-line pass already skips comments, but the substitution pass reads the whole
+    source at once, so a backtick used as prose punctuation inside a comment was being read
+    as a command substitution and reported as a dependency.
+    """
+    out = []
+    quote = None
+    for raw in src.splitlines():
+        buf = []
+        i = 0
+        prev_ws = True
+        while i < len(raw):
+            ch = raw[i]
+            if ch == "\\" and quote != "'":
+                buf.append(ch)
+                if i + 1 < len(raw):
+                    buf.append(raw[i + 1])
+                i += 2
+                prev_ws = False
+                continue
+            if quote is not None:
+                buf.append(ch)
+                if ch == quote:
+                    quote = None
+                i += 1
+                prev_ws = False
+                continue
+            if ch in ("'", '"'):
+                quote = ch
+                buf.append(ch)
+                i += 1
+                prev_ws = False
+                continue
+            if ch == "#" and prev_ws:
+                break
+            buf.append(ch)
+            prev_ws = ch.isspace()
+            i += 1
+        out.append("".join(buf))
+    return "\n".join(out)
+
+
 _CMDSUB_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
 
 
@@ -741,7 +790,30 @@ def _tokens(text):
 _SEPS = {";", "|", "||", "&&", "&", ";;"}
 
 
+def _case_label_cut(toks):
+    """Index of a close paren that has no opener, or -1.
+
+    `true|1|yes|y) cmd ;;` splits on the pipes into what looks like four commands. In valid
+    shell an unmatched close paren terminates a case label, so everything up to it is data.
+    """
+    depth = 0
+    for i, t in enumerate(toks):
+        if not t or set(t) - {"(", ")"}:
+            continue
+        for ch in t:
+            if ch == "(":
+                depth += 1
+            else:
+                if depth == 0:
+                    return i
+                depth -= 1
+    return -1
+
+
 def _scan_tokens(toks, reach, origin, depth):
+    cut = _case_label_cut(toks)
+    if cut >= 0:
+        toks = toks[cut + 1 :]
     segs, cur = [], []
     for t in toks:
         if t in _SEPS:
@@ -816,7 +888,7 @@ def scan_shell(src, reach, origin, depth=0):
     # treats a newline as ordinary whitespace: reading it whole merges every line into one
     # segment, which loses every command after the first and makes the first command appear to
     # write to every path in the script.
-    _scan_substitutions(src, reach, origin, depth)
+    _scan_substitutions(_strip_comments(src), reach, origin, depth)
     if "\n" not in src:
         whole = _tokens(src)
         if whole is not None:
