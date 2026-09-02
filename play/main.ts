@@ -7,7 +7,7 @@
  * provenance:
  *   author: sookra <stephensookra@gmail.com>
  * metadata:
- *   version: 0.2.1
+ *   version: 0.2.2
  *   rote_version: 0.78.0
  *   status: released
  *   kind: atomic
@@ -121,7 +121,10 @@ const join = (v: unknown): string => {
 };
 
 const lines: string[] = [];
-const count = packages.length;
+// count is the number READ; `packages` may be trimmed for output size, so never use its length.
+const count = Number(reach.payload?.count ?? packages.length);
+const detailed = Number(reach.payload?.detailed ?? packages.length);
+const trimmed = Number(reach.payload?.trimmed ?? 0);
 const undeclaredTotal = Number(reach.payload?.undeclared_total ?? 0);
 const missingTotal = Number(reach.payload?.missing_total ?? 0);
 
@@ -134,6 +137,12 @@ if (count === 0) {
   lines.push(
     `${count} package(s) read. ${undeclaredTotal} reach(es) that no manifest declares. ${missingTotal} of those are missing on this machine.`,
   );
+  if (trimmed > 0) {
+    lines.push("");
+    lines.push(
+      `The counts above cover all ${count}. The table below shows ${detailed} of them, the ones with a finding first; ${trimmed} clean row(s) are not listed.`,
+    );
+  }
   lines.push("");
   lines.push("| Play | Declared | Reached | Undeclared but reached | Missing here | rote says |");
   lines.push("|---|---:|---:|---|---|---|");

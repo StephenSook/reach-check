@@ -74,6 +74,13 @@ if note is not None:
     raise SystemExit(0)
 
 # Keep the whole step inside its declared budget no matter how many packages are installed.
+# Per-call time alone does not bound the step: N packages times a 4s floor is unbounded, and a
+# store with hundreds of Plays timed the whole step out. Bound the COUNT as well as the time.
+MAX_REFS = 6
+skipped_refs = 0
+if len(refs) > MAX_REFS:
+    skipped_refs = len(refs) - MAX_REFS
+    refs = refs[:MAX_REFS]
 budget = max(4, min(18, int(20 / max(1, len(refs))) if refs else 18))
 
 verdicts = {}
@@ -102,4 +109,11 @@ for ref in refs:
         "privileged_access": ex.get("privileged_access"),
     }
 
-print(json.dumps({"ok": True, "available": True, "count": len(verdicts), "verdicts": verdicts}))
+payload = {"ok": True, "available": True, "count": len(verdicts), "verdicts": verdicts}
+if skipped_refs:
+    payload["warning"] = (
+        "rote's own verdict was read for the first %d package(s) only; %d more were skipped so the "
+        "step stays inside its time budget. Ask for one package by name to see its verdict."
+        % (len(verdicts), skipped_refs)
+    )
+print(json.dumps(payload))

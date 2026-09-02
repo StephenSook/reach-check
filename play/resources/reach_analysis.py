@@ -1137,6 +1137,22 @@ def main():
             )
     gaps = sum(len(p.get("undeclared_but_reached", [])) for p in packages)
     missing = sum(len(p.get("missing_here", [])) for p in packages)
+
+    # A store with hundreds of Plays produced 172 KB of stdout, which overran the step output
+    # capture and made the whole run fail. Totals stay exact; only the per-package detail is
+    # trimmed, to the rows a reader actually wants, and the trim is disclosed rather than silent.
+    DETAIL_CAP = 60
+    total_packages = len(packages)
+    if total_packages > DETAIL_CAP:
+        interesting = [
+            p for p in packages
+            if p.get("undeclared_but_reached") or p.get("missing_here") or p.get("notes")
+        ]
+        rest = [p for p in packages if p not in interesting]
+        packages = (interesting + rest)[:DETAIL_CAP]
+        trimmed = total_packages - len(packages)
+    else:
+        trimmed = 0
     print(
         json.dumps(
             {
@@ -1146,7 +1162,9 @@ def main():
                 "flows_root": os.path.expanduser(root),
                 "python": sys.version.split()[0],
                 "stdlib_source": "api" if hasattr(sys, "stdlib_module_names") else "sysconfig-fallback",
-                "count": len(packages),
+                "count": total_packages,
+                "detailed": len(packages),
+                "trimmed": trimmed,
                 "undeclared_total": gaps,
                 "missing_total": missing,
                 "packages": packages,
