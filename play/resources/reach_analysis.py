@@ -1007,6 +1007,71 @@ def module_present(name):
         return False
 
 
+# Directories every unix has. An absolute path into one of these is portable and is not a finding.
+SYSTEM_BIN_PREFIXES = (
+    "/usr/bin/",
+    "/bin/",
+    "/usr/sbin/",
+    "/sbin/",
+    "/usr/local/bin/",
+    "/opt/homebrew/bin/",
+    "/usr/libexec/",
+)
+# A path under a user home is broken for everyone who is not that user, whatever it resolves to here.
+HOME_PREFIXES = ("/Users/", "/home/", "/root/")
+
+
+def portability_paths(steps):
+    """Absolute paths in argv that a published package cannot rely on.
+
+    `rote play inspect` resolves declared tools and says nothing about argv, so a step whose
+    argv points at a file in the author's home directory reports as eligible and then cannot
+    run for anybody else. Seen on real published Plays, including one where argv[0] itself is
+    an interpreter inside a devcontainer venv.
+
+    A `@resource{...}` reference is package-relative and travels in the archive, so it is fine.
+    """
+    out = []
+    for sname, step in (steps or {}).items():
+        if not isinstance(step, dict):
+            continue
+        for i, arg in enumerate(step.get("argv") or []):
+            if not isinstance(arg, str) or not arg:
+                continue
+            if arg.startswith("@resource{") or arg.startswith("@"):
+                continue
+            if arg.startswith("~"):
+                target = os.path.expanduser(arg)
+            elif arg.startswith("/"):
+                target = arg
+            else:
+                continue
+            in_home = any(target.startswith(h) for h in HOME_PREFIXES) or arg.startswith("~")
+            in_system = any(target.startswith(sp) for sp in SYSTEM_BIN_PREFIXES)
+            if in_system and not in_home:
+                continue
+            exists = os.path.exists(target)
+            if not in_home and exists:
+                # An absolute path outside a home that resolves here is worth noting only when
+                # it is clearly machine-specific; leave the quiet case alone.
+                continue
+            out.append(
+                {
+                    "step": sname,
+                    "argv_index": i,
+                    "path": arg,
+                    "exists_here": exists,
+                    "in_home_directory": in_home,
+                    "why": (
+                        "path inside a user home directory, so it cannot resolve for anyone else"
+                        if in_home
+                        else "absolute path that does not resolve on this machine"
+                    ),
+                }
+            )
+    return out
+
+
 def analyze(pkg_dir, ref):
     steps, md, declared, source, load_notes = load_package(pkg_dir)
     reach = Reach()
@@ -1061,6 +1126,7 @@ def analyze(pkg_dir, ref):
         "adapters_declared": declared_endpoints,
         "needs_browser": kinds.get("browser", 0) > 0,
         "step_kinds": kinds,
+        "unportable_paths": portability_paths(steps),
         "notes": reach.notes,
     }
 
@@ -1137,6 +1203,8 @@ def main():
             )
     gaps = sum(len(p.get("undeclared_but_reached", [])) for p in packages)
     missing = sum(len(p.get("missing_here", [])) for p in packages)
+    unportable = sum(len(p.get("unportable_paths", [])) for p in packages)
+    unportable_pkgs = sum(1 for p in packages if p.get("unportable_paths"))
 
     # A store with hundreds of Plays produced 172 KB of stdout, which overran the step output
     # capture and made the whole run fail. Totals stay exact; only the per-package detail is
@@ -1145,8 +1213,19 @@ def main():
     total_packages = len(packages)
     if total_packages > DETAIL_CAP:
         interesting = [
-            p for p in packages if p.get("undeclared_but_reached") or p.get("missing_here") or p.get("notes")
+            p
+            for p in packages
+            if p.get("undeclared_but_reached") or p.get("missing_here") or p.get("unportable_paths") or p.get("notes")
         ]
+        # Severity order, so the cap never trims away the worst finding. A step pointing at
+        # someone else's home directory cannot run for anybody, which outranks a missing tool.
+        interesting.sort(
+            key=lambda p: (
+                0 if p.get("unportable_paths") else 1,
+                0 if p.get("missing_here") else 1,
+                0 if p.get("undeclared_but_reached") else 1,
+            )
+        )
         rest = [p for p in packages if p not in interesting]
         packages = (interesting + rest)[:DETAIL_CAP]
         trimmed = total_packages - len(packages)
@@ -1162,6 +1241,8 @@ def main():
                 "python": sys.version.split()[0],
                 "stdlib_source": "api" if hasattr(sys, "stdlib_module_names") else "sysconfig-fallback",
                 "count": total_packages,
+                "unportable_total": unportable,
+                "unportable_packages": unportable_pkgs,
                 "detailed": len(packages),
                 "trimmed": trimmed,
                 "undeclared_total": gaps,

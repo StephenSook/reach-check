@@ -260,6 +260,34 @@ if _ok:
     )
     check("large store: stdout stays well under the step output limit", len(_r.stdout) < 120000, len(_r.stdout))
 
+print("unportable argv paths: a step that cannot run for anyone but its author")
+_cases = [
+    ("a path in a user home directory is reported", {"s": {"argv": ["node", "/Users/bob/proj/cli.js"]}}, True),
+    (
+        "argv[0] itself in a home directory is reported",
+        {"s": {"argv": ["/home/vscode/.cache/venv/bin/python", "x.py"]}},
+        True,
+    ),
+    ("a tilde path is reported", {"s": {"argv": ["python3", "~/secret/thing.py"]}}, True),
+    (
+        "a @resource reference travels in the archive and is not reported",
+        {"s": {"argv": ["python3", "@resource{body.py}"]}},
+        False,
+    ),
+    (
+        "/usr/bin/env exists everywhere and is not reported",
+        {"s": {"argv": ["/usr/bin/env", "python3", "-c", "x=1"]}},
+        False,
+    ),
+    ("/bin/sh is not reported", {"s": {"argv": ["/bin/sh", "-c", "echo hi"]}}, False),
+    ("a homebrew bin path is not reported", {"s": {"argv": ["/opt/homebrew/bin/jq", "."]}}, False),
+    ("a relative path is not reported", {"s": {"argv": ["python3", "scripts/run.py"]}}, False),
+    ("a bare command is not reported", {"s": {"argv": ["git", "status"]}}, False),
+    ("a flag is not mistaken for a path", {"s": {"argv": ["ls", "-la"]}}, False),
+]
+for _label, _steps, _want in _cases:
+    check(_label, (len(mod.portability_paths(_steps)) > 0) == _want, mod.portability_paths(_steps))
+
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:

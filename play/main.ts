@@ -4,12 +4,12 @@
  * ---
  * name: reach-check
  * source: https://play.modiqo.ai/sookra/reach-check
- * description: See what a Play actually reaches on this machine before you publish it or run it. rote play inspect shows what a Play declares and resolves those declarations against your host. This reads the step bodies themselves, follows sh -c, python3 -c and @resource files, and reports the executables, imports, adapters, browser steps, environment variables and writes they really touch, together with which of them are missing here. It never runs, imports or pulls the Play it reads, and it writes nothing. The one subprocess it runs is rote play inspect, to report rote's own verdict beside this one, and offline=true skips it.
+ * description: See what a Play actually reaches on this machine before you publish it or run it. rote play inspect shows what a Play declares and resolves those declarations against your host. This reads the step bodies themselves, follows sh -c, python3 -c and @resource files, and reports the executables, imports, adapters, browser steps, environment variables and writes they really touch, together with which of them are missing here. It also flags argv paths that point at a user home directory or do not resolve here, which is how a published Play ends up running only on its author's machine. It never runs, imports or pulls the Play it reads, and it writes nothing. The one subprocess it runs is rote play inspect, to report rote's own verdict beside this one, and offline=true skips it.
  * provenance:
  *   author: sookra <stephensookra@gmail.com>
  *   url: https://play.modiqo.ai/sookra/reach-check
  * metadata:
- *   version: 0.2.3
+ *   version: 0.3.0
  *   contract:
  *     atomic: true
  *     input:
@@ -148,6 +148,8 @@ const detailed = Number(reach.payload?.detailed ?? packages.length);
 const trimmed = Number(reach.payload?.trimmed ?? 0);
 const undeclaredTotal = Number(reach.payload?.undeclared_total ?? 0);
 const missingTotal = Number(reach.payload?.missing_total ?? 0);
+const unportableTotal = Number(reach.payload?.unportable_total ?? 0);
+const unportablePkgs = Number(reach.payload?.unportable_packages ?? 0);
 
 if (count === 0) {
   lines.push("No Play package matched.");
@@ -158,6 +160,12 @@ if (count === 0) {
   lines.push(
     `${count} package(s) read. ${undeclaredTotal} reach(es) that no manifest declares. ${missingTotal} of those are missing on this machine.`,
   );
+  if (unportableTotal > 0) {
+    lines.push("");
+    lines.push(
+      `${unportableTotal} argv path(s) across ${unportablePkgs} package(s) point outside the package, at a user home directory or a path that does not resolve here. Those steps cannot run for anyone but their author.`,
+    );
+  }
   if (trimmed > 0) {
     lines.push("");
     lines.push(
