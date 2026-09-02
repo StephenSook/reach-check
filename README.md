@@ -97,7 +97,7 @@ reported. **A false claim about someone else's package is the worst failure this
 python3 tests/test_reach.py
 ```
 
-50 checks against fixture packages, so the suite needs nothing installed and no packages pulled. CI
+52 checks against fixture packages, so the suite needs nothing installed and no packages pulled. CI
 runs it on python 3.9 and 3.13, on Linux and macOS.
 
 Most of those checks exist because the tool was proved wrong and then fixed. Running it against 20

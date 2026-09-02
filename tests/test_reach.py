@@ -205,6 +205,12 @@ check(
 )
 check("a device sink is not reported as a filesystem write", "/dev/zero" not in out, out)
 
+print("dotted-imports: find_spec must only ever see a top-level name")
+r = analyze("dotted-imports")
+all_mods = r["third_party_imports"] + r.get("sibling_modules", []) + r["missing_modules"]
+check("no dotted name survives to the module check", not any("." in mo for mo in all_mods), all_mods)
+check("dotted stdlib imports resolve without being reported missing", r["missing_modules"] == [], r["missing_modules"])
+
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:

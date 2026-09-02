@@ -1,0 +1,1 @@
+{"name": "dotted-imports", "description": "A dotted import must be reduced to its top-level name, because find_spec on a dotted name imports the parent package.", "metadata": {"runtime_dependencies": {"host_tools": [{"id": "python3", "command": "python3", "required": true}]}}, "steps": {"probe": {"type": "process.exec", "argv": ["python3", "@resource{dotted.py}"]}}}

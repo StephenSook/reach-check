@@ -47,8 +47,28 @@ jobs:
             exit 1
           fi
           echo "ok: no execution primitives in the extractor"
-      - name: find_spec must only ever see a top-level name
+      - name: the extractor must import only the standard library
         run: |
-          grep -q "split('.')\[0\]" play/resources/reach_analysis.py || {
-            echo "FAIL: imports are not reduced to their top-level name"; exit 1; }
-          echo "ok: imports reduced to top-level names"
+          python3 - <<'CHECK'
+          import ast, sys
+          ALLOWED = {
+              "ast", "hashlib", "importlib", "json", "os", "pathlib", "platform",
+              "re", "shlex", "shutil", "subprocess", "sys", "sysconfig",
+          }
+          bad = []
+          for path in ("play/resources/reach_analysis.py", "play/resources/rote_verdict.py",
+                       "play/resources/host_facts.py"):
+              tree = ast.parse(open(path).read())
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      for a in node.names:
+                          if a.name.split(".")[0] not in ALLOWED:
+                              bad.append((path, a.name))
+                  elif isinstance(node, ast.ImportFrom):
+                      if node.module and node.module.split(".")[0] not in ALLOWED:
+                          bad.append((path, node.module))
+          if bad:
+              print("FAIL: non-standard-library import:", bad)
+              sys.exit(1)
+          print("ok: standard library only, checked by parsing not by grep")
+          CHECK
