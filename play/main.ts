@@ -3,17 +3,38 @@
  * @rote-frontmatter
  * ---
  * name: reach-check
+ * source: https://play.modiqo.ai/sookra/reach-check
  * description: See what a Play actually reaches on this machine before you publish it or run it. rote play inspect shows what a Play declares and resolves those declarations against your host. This reads the step bodies themselves, follows sh -c, python3 -c and @resource files, and reports the executables, imports, adapters, browser steps, environment variables and writes they really touch, together with which of them are missing here. It never runs, imports or pulls the Play it reads, and it writes nothing. The one subprocess it runs is rote play inspect, to report rote's own verdict beside this one, and offline=true skips it.
  * provenance:
  *   author: sookra <stephensookra@gmail.com>
+ *   url: https://play.modiqo.ai/sookra/reach-check
  * metadata:
- *   version: 0.2.2
+ *   version: 0.2.3
+ *   contract:
+ *     atomic: true
+ *     input:
+ *       type: none
+ *     output:
+ *       format: json
+ *       destination: stdout
+ *     composable: true
  *   rote_version: 0.78.0
  *   status: released
  *   kind: atomic
  *   flow_type: parallel
  *   execution_model: steps_with_presentation
  *   requires_sessions: false
+ * tags:
+ * - domain-rote-plays
+ * - job-dependency-audit
+ * - audience-play-authors
+ * - effect-read-only
+ * discoverability:
+ *   tags:
+ *   - domain-rote-plays
+ *   - job-dependency-audit
+ *   - audience-play-authors
+ *   - effect-read-only
  * parameters:
  * - name: play
  *   type: string
