@@ -9,7 +9,7 @@
  *   author: sookra <stephensookra@gmail.com>
  *   url: https://play.modiqo.ai/sookra/reach-check
  * metadata:
- *   version: 0.3.1
+ *   version: 0.3.2
  *   contract:
  *     atomic: true
  *     input:

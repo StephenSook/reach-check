@@ -374,6 +374,46 @@ for _label, _body, _want in _hazards:
 _c = shell_execs("python3 -c 'import os\nprint(os.getcwd())'\n")
 check("an embedded python body is still read as python", "python3" in _c, sorted(_c))
 
+
+# A body in a language this tool does not read must be named. Silence about it is
+# indistinguishable from finding nothing in it, and that is how a node -e body that
+# requires fs looked like a Play that reaches nothing at all.
+print()
+print("bodies this tool cannot read")
+
+
+def unread(steps):
+    r = mod.Reach()
+    for name, st in steps.items():
+        mod.scan_step(st, FIX, r, name)
+    return r.unanalysed
+
+
+_node = {"s": {"type": "process.exec", "argv": ["node", "-e", "const fs=require('fs'); fs.readdirSync('.')"]}}
+check("an inline node body is reported as unread", len(unread(_node)) == 1, unread(_node))
+
+_deno = {"s": {"type": "process.exec", "argv": ["deno", "eval", "console.log(1)"]}}
+check("an inline deno body is reported as unread", len(unread(_deno)) == 1, unread(_deno))
+
+_ruby = {"s": {"type": "process.exec", "argv": ["ruby", "-e", "puts 1"]}}
+check("an inline ruby body is reported as unread", len(unread(_ruby)) == 1, unread(_ruby))
+
+# Negative controls: the languages it does read must still be read, not marked unread.
+_py = {"s": {"type": "process.exec", "argv": ["python3", "-c", "import os\nos.getcwd()"]}}
+check("an inline python body is still read, not marked unread", unread(_py) == [], unread(_py))
+
+_sh = {"s": {"type": "process.exec", "argv": ["sh", "-c", "git status"]}}
+check("an inline shell body is still read, not marked unread", unread(_sh) == [], unread(_sh))
+
+_node_plain = {"s": {"type": "process.exec", "argv": ["node", "script.js"]}}
+check("node without an eval flag reports nothing spurious", unread(_node_plain) == [], unread(_node_plain))
+
+_node_empty = {"s": {"type": "process.exec", "argv": ["node", "-e", "   "]}}
+check("an empty inline body reports nothing", unread(_node_empty) == [], unread(_node_empty))
+
+_c = shell_execs("git status\n")
+check("the shell reader still works after the change", "git" in _c, sorted(_c))
+
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:

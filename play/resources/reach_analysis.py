@@ -987,6 +987,18 @@ _SH_EXT = (".sh", ".bash", ".zsh", ".ksh")
 _JS_EXT = (".mjs", ".cjs", ".js", ".ts", ".tsx", ".jsx")
 
 
+# Interpreters that take a program on the command line. This tool reads python and shell;
+# for anything else the body is recorded as unread rather than passed over in silence.
+INLINE_EVAL = {
+    "node": ("-e", "--eval"),
+    "bun": ("-e", "--eval"),
+    "deno": ("eval",),
+    "ruby": ("-e",),
+    "perl": ("-e",),
+    "php": ("-r",),
+}
+
+
 def body_language(resource_name, interpreter):
     """Decide how to read a resource body: by its extension, else by the step's interpreter."""
     ext = os.path.splitext(resource_name)[1].lower()
@@ -1066,6 +1078,23 @@ def scan_step(step, pkg_dir, reach, step_name):
             i = argv.index("-c")
             if i + 1 < len(argv):
                 scan_shell(argv[i + 1], reach, step_name)
+        else:
+            # An inline body in a language this tool does not read must be NAMED. Saying
+            # nothing about it is indistinguishable from finding nothing in it, and a
+            # `node -e` body that requires fs was reading the filesystem while this tool
+            # reported an empty reach set.
+            for flag in INLINE_EVAL.get(head, ()):
+                if flag in argv:
+                    i = argv.index(flag)
+                    if i + 1 < len(argv) and argv[i + 1].strip():
+                        reach.unanalysed.append(
+                            {
+                                "step": step_name,
+                                "resource": "inline %s %s body" % (head, flag),
+                                "reason": "this tool reads python and shell; a %s body is not read" % head,
+                            }
+                        )
+                    break
     return "process"
 
 
