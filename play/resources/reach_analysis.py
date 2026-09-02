@@ -1145,8 +1145,7 @@ def main():
     total_packages = len(packages)
     if total_packages > DETAIL_CAP:
         interesting = [
-            p for p in packages
-            if p.get("undeclared_but_reached") or p.get("missing_here") or p.get("notes")
+            p for p in packages if p.get("undeclared_but_reached") or p.get("missing_here") or p.get("notes")
         ]
         rest = [p for p in packages if p not in interesting]
         packages = (interesting + rest)[:DETAIL_CAP]

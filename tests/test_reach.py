@@ -11,8 +11,11 @@ floor a stranger on a stock macOS actually has.
 """
 
 import importlib.util
+import json
 import os
+import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -220,44 +223,42 @@ check("follows env past its assignments", "env-tool" in r["reached"], r["reached
 check("does not report the forwarding builtin itself", not ({"command", "exec"} & set(r["reached"])), r["reached"])
 
 print("large store: a store with hundreds of Plays must still complete")
-import json as _json
-import subprocess as _sp
-import tempfile as _tf
-
-_store = _tf.mkdtemp(prefix="reachscale-")
+_store = tempfile.mkdtemp(prefix="reachscale-")
 for _i in range(90):
     _pkg = os.path.join(_store, "owner%d" % _i, "p%d" % _i)
     os.makedirs(_pkg)
     with open(os.path.join(_pkg, "manifest.json"), "w", encoding="utf-8") as _f:
-        _json.dump({
-            "name": "p%d" % _i,
-            "description": "x",
-            "metadata": {},
-            "steps": {"s": {"type": "process.exec",
-                            "argv": ["python3", "-c", "import os\nprint(1)\n"]}},
-        }, _f)
+        json.dump(
+            {
+                "name": "p%d" % _i,
+                "description": "x",
+                "metadata": {},
+                "steps": {"s": {"type": "process.exec", "argv": ["python3", "-c", "import os\nprint(1)\n"]}},
+            },
+            _f,
+        )
 
 _script = os.path.join(HERE, "..", "play", "resources", "reach_analysis.py")
-_r = _sp.run([sys.executable, _script, "all", _store, "false"],
-             capture_output=True, text=True, timeout=120)
+_r = subprocess.run([sys.executable, _script, "all", _store, "false"], capture_output=True, text=True, timeout=120)
 check("large store: exits zero", _r.returncode == 0, _r.stderr[:200])
 _ok = False
 try:
-    _out = _json.loads(_r.stdout)
+    _out = json.loads(_r.stdout)
     _ok = True
 except ValueError:
     _out = {}
 check("large store: stdout is valid JSON", _ok, _r.stdout[:120])
 if _ok:
-    check("large store: count is the TOTAL read, not the trimmed list",
-          _out.get("count", 0) >= 90, _out.get("count"))
-    check("large store: per-package detail is capped",
-          len(_out.get("packages", [])) <= 60, len(_out.get("packages", [])))
-    check("large store: the trim is disclosed, not silent",
-          _out.get("trimmed") == _out.get("count", 0) - _out.get("detailed", 0),
-          (_out.get("count"), _out.get("detailed"), _out.get("trimmed")))
-    check("large store: stdout stays well under the step output limit",
-          len(_r.stdout) < 120000, len(_r.stdout))
+    check("large store: count is the TOTAL read, not the trimmed list", _out.get("count", 0) >= 90, _out.get("count"))
+    check(
+        "large store: per-package detail is capped", len(_out.get("packages", [])) <= 60, len(_out.get("packages", []))
+    )
+    check(
+        "large store: the trim is disclosed, not silent",
+        _out.get("trimmed") == _out.get("count", 0) - _out.get("detailed", 0),
+        (_out.get("count"), _out.get("detailed"), _out.get("trimmed")),
+    )
+    check("large store: stdout stays well under the step output limit", len(_r.stdout) < 120000, len(_r.stdout))
 
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
