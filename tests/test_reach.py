@@ -51,6 +51,9 @@ r = analyze("loop-variable")
 check("finds both tools bound in a module-level list", {"alpha-tool", "beta-tool"} <= set(r["reached"]), r["reached"])
 check("reports them as undeclared", {"alpha-tool", "beta-tool"} <= set(r["undeclared_but_reached"]), r["undeclared_but_reached"])
 check("still records the declared interpreter", "python3" in r["reached"], r["reached"])
+check("an argv list bound to a name yields the command, not its arguments",
+      "listing-tool" in r["reached"] and not any(c in r["reached"] for c in ("-axo", "pid=,rss=")),
+      r["reached"])
 
 print("shell-nested: a shell body that writes and nests an interpreter")
 r = analyze("shell-nested")
@@ -78,6 +81,39 @@ check("reads the package from main.ts frontmatter", "frontmatter" in r["read_fro
 check("parses a YAML block scalar body", "delta-tool" in r["reached"], r["reached"])
 check("does not mistake depends_on entries for argv", "probe" not in r["reached"], r["reached"])
 check("reads declared tools from deps.toml", r["declared"] == ["python3"], r["declared"])
+
+print("nested-resources: sibling modules in a subdirectory")
+r = analyze("nested-resources")
+check("follows a resource in a subdirectory", "nested-tool" in r["reached"], r["reached"])
+check("treats a nested sibling module as local, not missing",
+      r["missing_modules"] == [] and "helper" in r.get("sibling_modules", []),
+      (r["missing_modules"], r.get("sibling_modules")))
+
+print("shell-script-resource: a real script, not a one-liner")
+r = analyze("shell-script-resource")
+check("finds the real commands", {"shell-only-tool", "find", "grep"} <= set(r["reached"]), r["reached"])
+check("reports no shell grammar words",
+      not ({"if", "then", "fi", "else", "for", "do", "done", "{", "}"} & set(r["reached"])), r["reached"])
+check("reports no shell builtins",
+      not ({"echo", "printf", "set", "exit", "test"} & set(r["reached"])), r["reached"])
+check("reports no assignments or globs",
+      not any(("=" in c) or ("*" in c) for c in r["reached"]), r["reached"])
+check("does not report a for-loop variable as a command", "f" not in r["reached"], r["reached"])
+
+print("escaping-resource: a package that points outside itself")
+r = analyze("escaping-resource")
+check("refuses to read outside the package",
+      any("escapes the package" in u.get("reason", "") for u in r["unanalysed_bodies"]),
+      r["unanalysed_bodies"])
+check("reads no content from the escape target", "root" not in r["reached"], r["reached"])
+
+print("javascript-body: a language this tool does not read")
+r = analyze("javascript-body")
+check("says plainly that the body was not analysed",
+      any("javascript" in u.get("reason", "") for u in r["unanalysed_bodies"]),
+      r["unanalysed_bodies"])
+check("does not silently claim there is no reach",
+      len(r["unanalysed_bodies"]) >= 1, r["unanalysed_bodies"])
 
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))

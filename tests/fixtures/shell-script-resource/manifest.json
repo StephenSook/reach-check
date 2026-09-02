@@ -1,0 +1,6 @@
+{
+  "name": "shell-script-resource",
+  "description": "A real shell script as a resource, with control flow the tokenizer must not report.",
+  "metadata": {"runtime_dependencies": {"host_tools": [{"id": "bash", "command": "bash", "required": true}]}},
+  "steps": {"probe": {"type": "process.exec", "argv": ["bash", "@resource{discover.sh}"]}}
+}

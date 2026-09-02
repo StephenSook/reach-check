@@ -1,11 +1,25 @@
 {
   "name": "loop-variable",
-  "description": "A binary invoked through a Python loop variable, which a regex cannot see.",
-  "metadata": {"runtime_dependencies": {"host_tools": [{"id": "python3", "command": "python3", "required": true}]}},
+  "description": "A binary reached through a loop variable, beside an argv list bound to a name.",
+  "metadata": {
+    "runtime_dependencies": {
+      "host_tools": [
+        {
+          "id": "python3",
+          "command": "python3",
+          "required": true
+        }
+      ]
+    }
+  },
   "steps": {
     "probe": {
       "type": "process.exec",
-      "argv": ["python3", "-c", "import shutil, subprocess\nTOOLS = ['alpha-tool', 'beta-tool']\nfor t in TOOLS:\n    if shutil.which(t):\n        subprocess.run([t, '--version'], capture_output=True)\n"]
+      "argv": [
+        "python3",
+        "-c",
+        "import shutil, subprocess\nTOOLS = ['alpha-tool', 'beta-tool']\nfor t in TOOLS:\n    if shutil.which(t):\n        subprocess.run([t, '--version'], capture_output=True)\nargv = ['listing-tool', '-axo', 'pid=,rss=']\nsubprocess.run(argv, capture_output=True)\n"
+      ]
     }
   }
 }

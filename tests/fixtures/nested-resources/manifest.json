@@ -1,0 +1,6 @@
+{
+  "name": "nested-resources",
+  "description": "Resource modules live in a subdirectory and import each other.",
+  "metadata": {"runtime_dependencies": {"host_tools": [{"id": "python3", "command": "python3", "required": true}]}},
+  "steps": {"probe": {"type": "process.exec", "argv": ["python3", "@resource{scripts/entry.py}"]}}
+}

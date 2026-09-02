@@ -1,0 +1,6 @@
+{
+  "name": "javascript-body",
+  "description": "A node body, which this tool cannot read and must say so rather than report nothing.",
+  "metadata": {"runtime_dependencies": {"host_tools": [{"id": "node", "command": "node", "required": true}]}},
+  "steps": {"probe": {"type": "process.exec", "argv": ["node", "@resource{check.mjs}"]}}
+}

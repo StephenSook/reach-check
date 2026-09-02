@@ -215,7 +215,44 @@ def load_package(pkg_dir):
 
 RESOURCE_RE = re.compile(r'@resource\{([^}]+)\}')
 INTERP_RE = re.compile(r'^@[A-Za-z_][A-Za-z0-9_]*\{')
-SHELLS = {'sh', 'bash', 'zsh', 'dash'}
+SHELLS = {'sh', 'bash', 'zsh', 'dash', 'ksh'}
+
+# Shell grammar words and shell builtins are not reached executables. A Play that runs `echo`
+# is not depending on /bin/echo, and reporting `fi` or `then` as a dependency would be a false
+# claim about somebody else's package, which is the worst failure this tool can have.
+SHELL_KEYWORDS = {
+    'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done', 'case', 'esac',
+    'in', 'function', 'select', 'time', 'coproc', '{', '}', '(', ')', '[[', ']]', '!', ';;', '&',
+}
+SHELL_BUILTINS = {
+    'alias', 'bg', 'bind', 'break', 'builtin', 'caller', 'cd', 'command', 'compgen', 'complete',
+    'compopt', 'continue', 'declare', 'dirs', 'disown', 'echo', 'enable', 'eval', 'exec', 'exit',
+    'export', 'false', 'fc', 'fg', 'getopts', 'hash', 'help', 'history', 'jobs', 'let', 'local',
+    'logout', 'mapfile', 'popd', 'printf', 'pushd', 'pwd', 'read', 'readarray', 'readonly',
+    'return', 'set', 'shift', 'shopt', 'source', 'suspend', 'test', 'times', 'trap', 'true',
+    'type', 'typeset', 'ulimit', 'umask', 'unalias', 'unset', 'wait', ':', '.', '[',
+}
+_CMD_OK = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.+-]*$')
+_ASSIGN_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*=')
+
+
+def plausible_command(tok):
+    """True only for tokens that can really be a command name.
+
+    Deliberately conservative. An assignment, a flag, a glob, a variable, a redirection or a
+    grammar word is not a command, and when in doubt this returns False so the tool stays quiet
+    rather than inventing a dependency.
+    """
+    if not tok or tok in SHELL_KEYWORDS or tok in SHELL_BUILTINS:
+        return False
+    if '=' in tok or tok.startswith('-') or tok.startswith('$'):
+        return False
+    if any(ch in tok for ch in '*?[]{}()<>|&;`"\'' + chr(92)):
+        return False
+    base = os.path.basename(tok)
+    if base in SHELL_BUILTINS or base in SHELL_KEYWORDS:
+        return False
+    return bool(_CMD_OK.match(base))
 PY_INTERP = re.compile(r'^python3(\.\d+)?$|^python$')
 PROC_CALLS = {'run', 'call', 'check_call', 'check_output', 'Popen'}
 WRITE_CMDS = {'mkdir', 'tee', 'cp', 'mv', 'rm', 'touch', 'ln', 'dd', 'truncate', 'install', 'rsync'}
@@ -250,6 +287,7 @@ class Reach:
         self.imports = set()
         self.envs = set()
         self.writes = []          # (command, target, scope)
+        self.unanalysed = []      # bodies this tool cannot read, named rather than skipped
         self.notes = []
 
 
@@ -260,50 +298,56 @@ def _const_str(node):
 
 
 def _collect_consts(tree):
-    """Module-level string and list-of-string bindings, plus for-loop targets over list literals."""
-    env = {}
+    """Return (assigned, iterated).
+
+    `assigned` maps a name to the ORDERED values of a literal assigned to it, so
+    argv = ["ps", "-axo", ...] resolves to the command "ps" and not to its arguments.
+    `iterated` maps a loop target to every value it takes, so `for h in TOOLS` reaches all
+    of TOOLS. Conflating the two reports a command's own flags as separate dependencies.
+    """
+    assigned, iterated = {}, {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
-            vals = None
             v = node.value
-            s = _const_str(v)
-            if s is not None:
-                vals = [s]
-            elif isinstance(v, (ast.List, ast.Tuple, ast.Set)):
+            vals = None
+            single = _const_str(v)
+            if single is not None:
+                vals = [single]
+            elif isinstance(v, (ast.List, ast.Tuple)):
                 items = [_const_str(e) for e in v.elts]
                 if items and all(i is not None for i in items):
                     vals = items
             if vals:
                 for t in node.targets:
                     if isinstance(t, ast.Name):
-                        env.setdefault(t.id, set()).update(vals)
+                        assigned[t.id] = vals
         elif isinstance(node, ast.For):
             it = node.iter
-            items = None
+            values = None
             if isinstance(it, (ast.List, ast.Tuple, ast.Set)):
                 cand = [_const_str(e) for e in it.elts]
                 if cand and all(c is not None for c in cand):
-                    items = cand
+                    values = cand
             elif isinstance(it, ast.Name):
-                items = sorted(env.get(it.id, []))
-            if items and isinstance(node.target, ast.Name):
-                env.setdefault(node.target.id, set()).update(items)
-    return env
+                values = assigned.get(it.id)
+            if values and isinstance(node.target, ast.Name):
+                iterated.setdefault(node.target.id, set()).update(values)
+    return assigned, iterated
 
 
-def _resolve_argv0(node, env):
-    """Return (set_of_names, is_dynamic) for the executable position of a call."""
+def _resolve_argv0(node, assigned, iterated):
+    """Return (candidate command names, unresolved) for the executable position of a call."""
     if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
         node = node.elts[0]
     s = _const_str(node)
     if s is not None:
         return {s}, False
     if isinstance(node, ast.Name):
-        vals = env.get(node.id)
+        if node.id in iterated:
+            return set(iterated[node.id]), False
+        vals = assigned.get(node.id)
         if vals:
-            return set(vals), False
-        return set(), True
-    if isinstance(node, ast.JoinedStr):
+            return {vals[0]}, False          # a bound argv list: the command is its head
         return set(), True
     return set(), True
 
@@ -324,7 +368,7 @@ def scan_python(src, reach, origin, depth=0):
     except SyntaxError as exc:
         reach.notes.append('unparseable python in %s: %s' % (origin, str(exc)[:60]))
         return
-    env = _collect_consts(tree)
+    assigned, iterated = _collect_consts(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
@@ -344,13 +388,13 @@ def scan_python(src, reach, origin, depth=0):
                         reach.dynamic.add('%s(<computed>)' % name)
             elif tail in PROC_CALLS and ('subprocess' in name or tail == 'Popen'):
                 if node.args:
-                    got, dyn = _resolve_argv0(node.args[0], env)
-                    reach.execs |= got
+                    got, dyn = _resolve_argv0(node.args[0], assigned, iterated)
+                    reach.execs |= {c for c in got if plausible_command(c)}
                     if dyn:
                         reach.dynamic.add('%s(<computed>)' % name)
             elif name in ('shutil.which',) and node.args:
-                got, dyn = _resolve_argv0(node.args[0], env)
-                reach.execs |= got
+                got, dyn = _resolve_argv0(node.args[0], assigned, iterated)
+                reach.execs |= {c for c in got if plausible_command(c)}
                 if dyn:
                     reach.dynamic.add('shutil.which(<computed>)')
             elif name in ('os.getenv', 'os.environ.get') and node.args:
@@ -373,21 +417,23 @@ def _classify_write(head, tokens, reach):
     reach.writes.append({'command': head, 'target': tgt, 'scope': scope})
 
 
-def scan_shell(src, reach, origin, depth=0):
-    if depth > 4:
-        reach.notes.append('shell nesting too deep in %s' % origin)
-        return
+def _tokens(text):
+    """Tokenise one chunk of shell. Returns None when the chunk cannot be lexed."""
     try:
-        lex = shlex.shlex(src, posix=True, punctuation_chars=True)
+        lex = shlex.shlex(text, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
-        toks = list(lex)
-    except ValueError as exc:
-        reach.notes.append('unlexable shell in %s: %s' % (origin, str(exc)[:60]))
-        return
-    seps = {';', '|', '||', '&&', '&', '\n'}
+        return list(lex)
+    except ValueError:
+        return None
+
+
+_SEPS = {';', '|', '||', '&&', '&', ';;'}
+
+
+def _scan_tokens(toks, reach, origin, depth):
     segs, cur = [], []
     for t in toks:
-        if t in seps:
+        if t in _SEPS:
             if cur:
                 segs.append(cur)
             cur = []
@@ -398,10 +444,18 @@ def scan_shell(src, reach, origin, depth=0):
     for seg in segs:
         if not seg:
             continue
-        head = seg[0]
         if '>' in seg or '>>' in seg:
             reach.writes.append({'command': 'redirect', 'target': None, 'scope': 'cwd'})
-        if head in ('>', '>>'):
+        if seg[0] in ('for', 'select', 'case'):
+            continue          # the loop variable and its word list are data, not commands
+        idx = 0
+        while idx < len(seg) and (seg[idx] in SHELL_KEYWORDS or _ASSIGN_RE.match(seg[idx])):
+            idx += 1
+        if idx >= len(seg):
+            continue
+        head = seg[idx]
+        seg = seg[idx:]
+        if not plausible_command(head):
             continue
         base = os.path.basename(head)
         reach.execs.add(base)
@@ -417,15 +471,78 @@ def scan_shell(src, reach, origin, depth=0):
                 scan_shell(seg[i + 1], reach, origin + '>sh -c', depth + 1)
 
 
+def scan_shell(src, reach, origin, depth=0):
+    """Read a shell body two ways and union the result.
+
+    The whole-source pass keeps a multi-line quoted body, such as a nested python3 -c, intact.
+    The per-line pass exists because shlex treats a newline as ordinary whitespace, so without it
+    a real script collapses into one segment and every command after the first is lost. Both
+    passes feed the same conservative command filter, so the union cannot invent a dependency.
+    """
+    if depth > 4:
+        reach.notes.append('shell nesting too deep in %s' % origin)
+        return
+    whole = _tokens(src)
+    if whole is not None:
+        _scan_tokens(whole, reach, origin, depth)
+    if '\n' in src:
+        unlexable = 0
+        for line in src.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            toks = _tokens(line)
+            if toks is None:
+                unlexable += 1
+                continue
+            _scan_tokens(toks, reach, origin, depth)
+        if unlexable:
+            reach.notes.append('%s: %d line(s) could not be tokenised and were skipped'
+                               % (origin, unlexable))
+    elif whole is None:
+        reach.notes.append('unlexable shell in %s' % origin)
+
+
 def read_resource(pkg_dir, name):
-    p = os.path.join(pkg_dir, 'resources', name)
-    if not os.path.isfile(p):
-        return None
+    """Read resources/<name>, refusing anything that escapes the package directory.
+
+    A package is untrusted input, so a reference like @resource{../../etc/passwd} must not
+    be followed. Returns (text, problem); exactly one of the two is None.
+    """
+    base = os.path.realpath(os.path.join(pkg_dir, 'resources'))
+    target = os.path.realpath(os.path.join(base, name))
+    if target != base and not target.startswith(base + os.sep):
+        return None, 'refused: the reference escapes the package directory'
+    if not os.path.isfile(target):
+        return None, 'missing or unreadable in the package'
     try:
-        with open(p, encoding='utf-8', errors='replace') as fh:
-            return fh.read()
-    except OSError:
-        return None
+        with open(target, encoding='utf-8', errors='replace') as fh:
+            return fh.read(), None
+    except OSError as exc:
+        return None, 'unreadable: %s' % str(exc)[:50]
+
+
+_PY_EXT = ('.py',)
+_SH_EXT = ('.sh', '.bash', '.zsh', '.ksh')
+_JS_EXT = ('.mjs', '.cjs', '.js', '.ts', '.tsx', '.jsx')
+
+
+def body_language(resource_name, interpreter):
+    """Decide how to read a resource body: by its extension, else by the step's interpreter."""
+    ext = os.path.splitext(resource_name)[1].lower()
+    if ext in _PY_EXT:
+        return 'python'
+    if ext in _SH_EXT:
+        return 'shell'
+    if ext in _JS_EXT:
+        return 'javascript'
+    if PY_INTERP.match(interpreter):
+        return 'python'
+    if interpreter in SHELLS:
+        return 'shell'
+    if interpreter in ('node', 'deno', 'bun'):
+        return 'javascript'
+    return 'unknown'
 
 
 def scan_step(step, pkg_dir, reach, step_name):
@@ -447,15 +564,24 @@ def scan_step(step, pkg_dir, reach, step_name):
     resource_bodies = []
     for a in body_args:
         for r in RESOURCE_RE.findall(a):
-            if r == SHIM:
+            if os.path.basename(r) == SHIM:
                 continue                      # rote's own exec shim, not the Play's reach
-            src = read_resource(pkg_dir, r)
+            src, problem = read_resource(pkg_dir, r)
             if src is None:
-                reach.notes.append('%s references @resource{%s} which is missing' % (step_name, r))
+                reach.notes.append('%s references @resource{%s}: %s' % (step_name, r, problem))
+                reach.unanalysed.append({'step': step_name, 'resource': r, 'reason': problem})
             else:
                 resource_bodies.append((r, src))
     for rname, src in resource_bodies:
-        scan_python(src, reach, '%s:%s' % (step_name, rname))
+        lang = body_language(rname, head)
+        origin = '%s:%s' % (step_name, rname)
+        if lang == 'python':
+            scan_python(src, reach, origin)
+        elif lang == 'shell':
+            scan_shell(src, reach, origin)
+        else:
+            reach.unanalysed.append({'step': step_name, 'resource': rname,
+                                     'reason': 'body is %s, which this tool does not read' % lang})
     if not resource_bodies:
         if PY_INTERP.match(head) and '-c' in argv:
             i = argv.index('-c')
@@ -492,9 +618,12 @@ def analyze(pkg_dir, ref):
     resdir = os.path.join(pkg_dir, 'resources')
     local_mods = set()
     if os.path.isdir(resdir):
-        for e in os.listdir(resdir):
-            if e.endswith('.py'):
-                local_mods.add(e[:-3])
+        # Resources nest, for example resources/scripts/helper.py, so walk rather than list.
+        # A sibling module is the package's own file, not a dependency it is missing.
+        for _dp, _dn, files in os.walk(resdir):
+            for e in files:
+                if e.endswith('.py'):
+                    local_mods.add(e[:-3])
     third_party = sorted(n for n in reach.imports if n not in STDLIB and n not in local_mods)
     sibling = sorted(n for n in reach.imports if n in local_mods)
     missing_mods = []
@@ -521,6 +650,7 @@ def analyze(pkg_dir, ref):
         'sibling_modules': sibling,
         'missing_modules': missing_mods,
         'env_vars_read': sorted(reach.envs),
+        'unanalysed_bodies': reach.unanalysed,
         'writes_cwd': [w for w in reach.writes if w['scope'] == 'cwd'],
         'writes_outside_cwd': [w for w in reach.writes if w['scope'] == 'outside_cwd'],
         'adapters_reached': adapters,

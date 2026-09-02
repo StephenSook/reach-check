@@ -1,0 +1,6 @@
+{
+  "name": "escaping-resource",
+  "description": "A hostile package pointing a resource reference outside its own directory.",
+  "metadata": {"runtime_dependencies": {"host_tools": []}},
+  "steps": {"probe": {"type": "process.exec", "argv": ["python3", "@resource{../../../../../../etc/passwd}"]}}
+}
