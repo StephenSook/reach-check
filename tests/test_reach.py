@@ -556,6 +556,39 @@ check("and write_text is untouched", len(_w) == 1, _w)
 _w = py_writes('from pathlib import Path\nPath("a").unlink()')
 check("and unlink is untouched", len(_w) == 1, _w)
 
+# A write whose target could not be read was recorded with an unknown scope and then dropped,
+# because only the cwd and outside_cwd buckets were reported. A package writing through a Path
+# held in an attribute therefore read as writing nothing at all: the silence this tool reports.
+# Across 416 installed packages this surfaced 99 previously invisible writes in 49 of them, and
+# moved nothing that was already reported.
+print()
+print("writes through a Path that is not a literal")
+
+
+def scopes(src):
+    return sorted((w["scope"], w["target"]) for w in py_writes(src))
+
+
+_attr = 'from pathlib import Path\n\n\nclass C:\n    def __init__(self, root: Path) -> None:\n        self.root = root\n        self.root.mkdir(parents=True, exist_ok=True)\n'
+check("a Path held in an attribute is recorded, not dropped", scopes(_attr) == [("unknown", None)], scopes(_attr))
+_var = 'from pathlib import Path\n\n\ndef f(target):\n    tmp = target.with_suffix(".tmp")\n    tmp.write_text("x")\n'
+check("so is a Path held in a local variable", scopes(_var) == [("unknown", None)], scopes(_var))
+_home = 'from pathlib import Path\n(Path.home() / ".cache" / "x").mkdir()'
+check("a Path built from constants under home scopes outside the working directory", scopes(_home) == [("outside_cwd", "~/.cache/x")], scopes(_home))
+_join = 'from pathlib import Path\nPath.home().joinpath(".cache", "x").mkdir()'
+check("joinpath with constant parts resolves the same way", scopes(_join) == [("outside_cwd", "~/.cache/x")], scopes(_join))
+_rel = 'from pathlib import Path\n(Path("out") / "r.txt").write_text("hi")'
+check("and a relative one still scopes to the working directory", scopes(_rel) == [("cwd", "out/r.txt")], scopes(_rel))
+_cwd = 'from pathlib import Path\n(Path.cwd() / "r.txt").write_text("hi")'
+check("Path.cwd() is the working directory", scopes(_cwd) == [("cwd", "r.txt")], scopes(_cwd))
+_mixed = 'from pathlib import Path\n(Path.home() / name / "x").write_text("hi")'
+check("a non-constant segment leaves the whole target unresolved", scopes(_mixed) == [("unknown", None)], scopes(_mixed))
+check(
+    "the arity guard still holds for a variable receiver",
+    py_writes('x = t.replace(" ", "_")\ny = u.replace("a", "b", 1)') == [],
+    py_writes('x = t.replace(" ", "_")\ny = u.replace("a", "b", 1)'),
+)
+
 
 # ---------------------------------------------------------------------------
 # This reads the copy installed on the machine, which is a snapshot from whenever it was pulled.

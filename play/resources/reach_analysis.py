@@ -573,8 +573,48 @@ PY_PATH_METHODS = {"write_text", "write_bytes", "mkdir", "touch", "unlink", "rmd
 _ARITY_ONLY_PATH_METHOD = {"replace": 1}
 
 
-def _record_py_write(reach, command, path_node):
-    path = _const_str(path_node)
+def _path_expr_str(node):
+    """Resolve a pathlib expression to a path string, or None when it cannot be read.
+
+    `Path("out") / "r.txt"`, `Path.home() / ".cache" / "x"` and `Path("a").joinpath("b")` are
+    built from constants, so they resolve and can be scoped. A Path held in a variable or an
+    attribute (`self.root.mkdir()`) cannot be, and returning None for those is the honest answer;
+    the caller records the write as unresolved rather than dropping it.
+    """
+    if node is None:
+        return None
+    const = _const_str(node)
+    if const is not None:
+        return const
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left = _path_expr_str(node.left)
+        right = _const_str(node.right)
+        if left is not None and right is not None:
+            # Normalised so `Path.cwd() / "r.txt"` reads as `r.txt` rather than `./r.txt`.
+            # `_path_scope` runs its own normpath for the escaping check, so collapsing here
+            # cannot hide `out/../../etc`.
+            return os.path.normpath(os.path.join(left, right))
+        return None
+    if isinstance(node, ast.Call):
+        tail = node.func.attr if isinstance(node.func, ast.Attribute) else _dotted(node.func)
+        head = _dotted(node.func) or ""
+        if head.endswith("Path") or tail == "Path":
+            return _const_str(node.args[0]) if node.args else "."
+        if head.endswith("Path.home") or head.endswith("expanduser"):
+            return "~"
+        if head.endswith("Path.cwd"):
+            return "."
+        if tail == "joinpath":
+            base = _path_expr_str(node.func.value)
+            parts = [_const_str(a) for a in node.args]
+            if base is not None and all(p is not None for p in parts):
+                return os.path.normpath(os.path.join(base, *parts))
+    return None
+
+
+def _record_py_write(reach, command, path_node, path=None):
+    if path is None:
+        path = _const_str(path_node)
     scope, target = _path_scope(path)
     reach.writes.append({"command": command, "target": target, "scope": scope})
 
@@ -683,11 +723,10 @@ def scan_python(src, reach, origin, depth=0):
                 want = _ARITY_ONLY_PATH_METHOD.get(tail)
                 if want is not None and (len(node.args) != want or node.keywords):
                     continue  # str.replace(old, new), not Path.replace(target)
-                recv = node.func.value
-                inner = None
-                if isinstance(recv, ast.Call) and recv.args:
-                    inner = recv.args[0]
-                _record_py_write(reach, "Path.%s" % tail, inner)
+                # The receiver is resolved as a whole expression, so `Path.home() / ".cache" / "x"`
+                # scopes correctly instead of reading as an unknown target. A Path reached through
+                # a variable or an attribute stays unresolved, and is reported as such.
+                _record_py_write(reach, "Path.%s" % tail, None, path=_path_expr_str(node.func.value))
         elif isinstance(node, ast.Subscript) and _normalise(_dotted(node.value), aliases) == "os.environ":
             key = _const_str(node.slice)
             if key:
@@ -1434,6 +1473,10 @@ def analyze(pkg_dir, ref):
         "unanalysed_bodies": reach.unanalysed,
         "writes_cwd": _dedupe_writes(reach.writes, "cwd"),
         "writes_outside_cwd": _dedupe_writes(reach.writes, "outside_cwd"),
+        # A write whose target could not be read is still a write. Reporting only the two scopes
+        # that resolved let a package that writes through a Path held in an attribute read as
+        # writing nothing at all, which is the silence this tool exists to report.
+        "writes_unresolved": _dedupe_writes(reach.writes, "unknown"),
         "adapters_reached": adapters,
         "adapters_declared": declared_endpoints,
         "needs_browser": kinds.get("browser", 0) > 0,

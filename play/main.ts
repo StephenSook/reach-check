@@ -9,7 +9,7 @@
  *   author: sookra <stephensookra@gmail.com>
  *   url: https://play.modiqo.ai/sookra/reach-check
  * metadata:
- *   version: 0.3.8
+ *   version: 0.3.9
  *   contract:
  *     atomic: true
  *     input:
@@ -228,8 +228,12 @@ if (count === 0) {
     }
     const wc = list(p.writes_cwd).length;
     const wo = list(p.writes_outside_cwd).length;
-    if (wc > 0 || wo > 0) {
-      detail.push(`- \`${ref}\` writes: ${wc} inside the working directory, ${wo} outside it.`);
+    const wu = list(p.writes_unresolved).length;
+    if (wc > 0 || wo > 0 || wu > 0) {
+      const where = wu > 0
+        ? `, and ${wu} whose target is built from a value this cannot read, so it could be either`
+        : "";
+      detail.push(`- \`${ref}\` writes: ${wc} inside the working directory, ${wo} outside it${where}.`);
     }
     const ad = list(p.adapters_reached);
     if (ad.length > 0) detail.push(`- \`${ref}\` calls adapter(s): ${ad.join(", ")}.`);
