@@ -10,9 +10,11 @@ It is deliberately dependency free and runs on python 3.9 and newer, which is th
 floor a stranger on a stock macOS actually has.
 """
 
+import contextlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -413,6 +415,56 @@ check("an empty inline body reports nothing", unread(_node_empty) == [], unread(
 
 _c = shell_execs("git status\n")
 check("the shell reader still works after the change", "git" in _c, sorted(_c))
+
+
+# A resources subdirectory this process cannot read was skipped in silence, and its modules
+# then looked like missing dependencies. The finding stays, because it is genuinely unknown,
+# but it must no longer arrive without a reason attached.
+print()
+print("an unreadable resources directory is disclosed")
+
+_t = tempfile.mkdtemp()
+try:
+    os.makedirs(os.path.join(_t, "resources", "scripts"))
+    with open(os.path.join(_t, "manifest.json"), "w") as fh:
+        json.dump(
+            {
+                "name": "t",
+                "description": "t",
+                "metadata": {"runtime_dependencies": {"host_tools": []}},
+                "steps": {"s": {"type": "process.exec", "argv": ["python3", "@resource{main.py}"]}},
+            },
+            fh,
+        )
+    with open(os.path.join(_t, "resources", "main.py"), "w") as fh:
+        fh.write("import helper\n")
+    with open(os.path.join(_t, "resources", "scripts", "helper.py"), "w") as fh:
+        fh.write("X = 1\n")
+
+    _ok = mod.analyze(_t, "t")
+    check(
+        "a sibling module in a readable subdirectory is not missing",
+        _ok.get("missing_modules") == [],
+        _ok.get("missing_modules"),
+    )
+    check("and nothing is said when there is nothing to say", not _ok.get("notes"), _ok.get("notes"))
+
+    os.chmod(os.path.join(_t, "resources", "scripts"), 0o000)
+    _bad = mod.analyze(_t, "t")
+    check(
+        "an unreadable resources directory is named in the notes",
+        any("could not be read" in n for n in (_bad.get("notes") or [])),
+        _bad.get("notes"),
+    )
+    check(
+        "and it is recorded as a body that was not read",
+        any("could not be read" in str(u.get("reason", "")) for u in (_bad.get("unanalysed_bodies") or [])),
+        _bad.get("unanalysed_bodies"),
+    )
+finally:
+    with contextlib.suppress(OSError):
+        os.chmod(os.path.join(_t, "resources", "scripts"), 0o755)
+    shutil.rmtree(_t, ignore_errors=True)
 
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))

@@ -1191,10 +1191,27 @@ def analyze(pkg_dir, ref):
     if os.path.isdir(resdir):
         # Resources nest, for example resources/scripts/helper.py, so walk rather than list.
         # A sibling module is the package's own file, not a dependency it is missing.
-        for _dp, _dn, files in os.walk(resdir):
+        # os.walk ignores errors by default, so a resources subdirectory this process cannot
+        # read is skipped in silence and its modules then look like missing dependencies.
+        # A false positive, and the tool says nothing about why.
+        walk_errors = []
+        for _dp, _dn, files in os.walk(resdir, onerror=walk_errors.append):
             for e in files:
                 if e.endswith(".py"):
                     local_mods.add(e[:-3])
+        for exc in walk_errors:
+            where = getattr(exc, "filename", None) or str(exc)
+            why = getattr(exc, "strerror", None) or type(exc).__name__
+            reach.notes.append(
+                "%s could not be read (%s), so a sibling module inside it may be reported as missing" % (where, why)
+            )
+            reach.unanalysed.append(
+                {
+                    "step": "-",
+                    "resource": str(where),
+                    "reason": "directory could not be read: %s" % why,
+                }
+            )
     third_party = sorted(n for n in reach.imports if n not in STDLIB and n not in local_mods)
     sibling = sorted(n for n in reach.imports if n in local_mods)
     missing_mods = []
