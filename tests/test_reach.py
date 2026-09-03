@@ -557,6 +557,35 @@ _w = py_writes('from pathlib import Path\nPath("a").unlink()')
 check("and unlink is untouched", len(_w) == 1, _w)
 
 
+# ---------------------------------------------------------------------------
+# This reads the copy installed on the machine, which is a snapshot from whenever it was pulled.
+# An author who has since declared a tool still showed up as reaching it undeclared, so a fixed
+# Play and a broken one looked identical. Reported by lgoyal6, whose license-guard had gone from
+# 1 declared tool at 0.1.0 to 9 at 0.5.0 while our installed copy stayed at 0.1.0.
+print()
+print("the age of what was read")
+
+_t = tempfile.mkdtemp()
+try:
+    os.makedirs(os.path.join(_t, "resources"))
+    with open(os.path.join(_t, "manifest.json"), "w") as fh:
+        fh.write(json.dumps({"name": "x", "steps": {}, "metadata": {}}))
+    _v, _p = mod.installed_snapshot(_t)
+    check("a package with no .rote-source reports no version rather than guessing", _v is None and _p is None, (_v, _p))
+    with open(os.path.join(_t, ".rote-source"), "w") as fh:
+        fh.write(json.dumps({"artifact_version": "0.1.0", "pulled_at": "2026-09-02T17:07:11Z"}))
+    _v, _p = mod.installed_snapshot(_t)
+    check("and reports both when the file is there", _v == "0.1.0" and _p.startswith("2026-09-02"), (_v, _p))
+    with open(os.path.join(_t, ".rote-source"), "w") as fh:
+        fh.write("{not json")
+    _v, _p = mod.installed_snapshot(_t)
+    check("a corrupt .rote-source degrades rather than raising", _v is None, (_v, _p))
+    _r = mod.analyze(_t, "x")
+    check("analyze carries the installed version through", "installed_version" in _r, sorted(_r.keys())[:6])
+finally:
+    shutil.rmtree(_t, ignore_errors=True)
+
+
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:

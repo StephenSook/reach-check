@@ -9,7 +9,7 @@
  *   author: sookra <stephensookra@gmail.com>
  *   url: https://play.modiqo.ai/sookra/reach-check
  * metadata:
- *   version: 0.3.6
+ *   version: 0.3.7
  *   contract:
  *     atomic: true
  *     input:
@@ -141,6 +141,7 @@ const join = (v: unknown): string => {
   return a.length === 0 ? "none" : a.join(", ");
 };
 
+const stale: string[] = [];
 const lines: string[] = [];
 // count is the number READ; `packages` may be trimmed for output size, so never use its length.
 const count = Number(reach.payload?.count ?? packages.length);
@@ -182,6 +183,18 @@ if (count === 0) {
       continue;
     }
     const v = verdicts[ref];
+    // reach-check reads the copy installed on this machine. If that snapshot is behind the
+    // registry, an undeclared reach may already have been declared upstream, and a fixed Play and
+    // a broken one look identical. Say so rather than reporting the stale row as fact.
+    const installed = p.installed_version ? String(p.installed_version) : null;
+    const current = v && v.registry_version ? String(v.registry_version) : null;
+    if (installed && current && installed !== current) {
+      stale.push(
+        `\`${ref}\`: read from the installed copy at ${installed}, but the registry now has ` +
+          `${current}. Anything listed as undeclared may already be declared there. ` +
+          `Pull it again before believing this row.`,
+      );
+    }
     let says = "not checked";
     if (v && v.available === true) {
       says = v.play_run_eligible === true ? "eligible" : "not eligible";
@@ -193,6 +206,12 @@ if (count === 0) {
     lines.push(
       `| \`${ref}\` | ${list(p.declared).length} | ${list(p.reached).length} | ${join(p.undeclared_but_reached)} | ${join(p.missing_here)} | ${says} |`,
     );
+  }
+
+  if (stale.length > 0) {
+    lines.push("");
+    lines.push("Read from a copy that is behind the registry");
+    for (const s of stale) lines.push(`- ${s}`);
   }
 
   const detail: string[] = [];
@@ -246,7 +265,9 @@ if (hp) {
   );
 }
 lines.push(
-  "`rote play inspect` reports what a Play declares and resolves that against this host. This reports what its steps reach. Reachability is evidence, not a guarantee of safety. This never runs, imports or pulls the Play it reads and writes nothing; the only subprocess it runs is `rote play inspect` itself, which `offline=true` skips.",
+  "This reads the copy installed on this machine, which is a snapshot from whenever it was pulled. " +
+    "Run `rote registry play pull <ref>` first if you want the current one. " +
+    "`rote play inspect` reports what a Play declares and resolves that against this host. This reports what its steps reach. Reachability is evidence, not a guarantee of safety. This never runs, imports or pulls the Play it reads and writes nothing; the only subprocess it runs is `rote play inspect` itself, which `offline=true` skips.",
 );
 if (notes.length > 0) {
   lines.push("");

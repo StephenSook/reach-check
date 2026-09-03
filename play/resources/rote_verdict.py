@@ -101,12 +101,17 @@ for ref in refs:
         err = (d.get("error") or {}).get("kind") or "inspect failed"
         verdicts[ref] = {"available": False, "warning": str(err)[:80]}
         continue
-    ex = ((d.get("data") or {}).get("play_inspect") or {}).get("execution") or {}
+    pi = (d.get("data") or {}).get("play_inspect") or {}
+    ex = pi.get("execution") or {}
+    # The registry's current version, so a reading taken from a stale installed copy can be
+    # marked as such instead of reporting reaches against a manifest the author already fixed.
+    ident = pi.get("identity") or {}
     verdicts[ref] = {
         "available": True,
         "play_run_eligible": ex.get("play_run_eligible"),
         "blockers": ex.get("blockers") or [],
         "privileged_access": ex.get("privileged_access"),
+        "registry_version": ident.get("version"),
     }
 
 payload = {"ok": True, "available": True, "count": len(verdicts), "verdicts": verdicts}

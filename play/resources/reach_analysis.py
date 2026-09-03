@@ -1293,6 +1293,23 @@ def portability_paths(steps):
     return out
 
 
+def installed_snapshot(pkg_dir):
+    """The version actually on disk, and when it was pulled.
+
+    reach-check reads the installed copy, which is a snapshot from whenever it was pulled. An
+    author who has since declared a tool still shows up as reaching it undeclared, so a fixed Play
+    and a broken one look identical. Every pulled package carries .rote-source, so the snapshot's
+    own version and date can be reported without a network call. Reported by lgoyal6.
+    """
+    src = os.path.join(pkg_dir, ".rote-source")
+    try:
+        with open(src, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        return None, None
+    return d.get("artifact_version"), d.get("pulled_at")
+
+
 def analyze(pkg_dir, ref):
     steps, md, declared, source, load_notes = load_package(pkg_dir)
     reach = Reach()
@@ -1343,9 +1360,12 @@ def analyze(pkg_dir, ref):
     missing_here = [c for c in reached if shutil.which(c) is None]
     declared_unreached = [c for c in declared if c not in reach.execs]
     required_missing = [c for c in declared if declared[c] and shutil.which(c) is None]
+    inst_version, pulled_at = installed_snapshot(pkg_dir)
     return {
         "ref": ref,
         "read_from": source,
+        "installed_version": inst_version,
+        "pulled_at": pulled_at,
         "declared": sorted(declared),
         "reached": reached,
         "undeclared_but_reached": sorted(undeclared),
