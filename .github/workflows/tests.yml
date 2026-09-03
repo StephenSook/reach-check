@@ -21,6 +21,8 @@ jobs:
         run: python3 -m compileall -q play/resources tests
       - name: Run the extractor tests
         run: python3 tests/test_reach.py
+      - name: Differential test against a recording-stub oracle
+        run: python3 tests/test_oracle.py
 
   lint:
     runs-on: ubuntu-latest
