@@ -522,6 +522,41 @@ _c = shell_execs("""case "$v" in\n  HEAD|branch) printf p ;;\nesac\n""")
 check("a case label is not read as a command", _c == set(), sorted(_c))
 
 
+# ---------------------------------------------------------------------------
+# `replace` is the one name in PY_PATH_METHODS that a builtin type also owns. Counting
+# `str.replace` as a filesystem write told 17 of 319 published packages that they write to
+# the working directory when they only rewrite a string, including two of the platform's own.
+# Claiming a write that does not happen is worse than missing one, so the arity check refuses
+# anything ambiguous. Found by auditing a Play whose author had deliberately declared no writes.
+print()
+print("writes that were being invented")
+
+
+def py_writes(src):
+    r = mod.Reach()
+    mod.scan_python(src, r, "test")
+    return r.writes
+
+
+check(
+    "str.replace with two arguments is not a write",
+    py_writes('x = t.replace(" ", "_")') == [],
+    py_writes('x = t.replace(" ", "_")'),
+)
+check("nor with three", py_writes('x = t.replace("a", "b", 1)') == [], py_writes('x = t.replace("a", "b", 1)'))
+check(
+    "nor chained",
+    py_writes('x = t.replace(FS, "?").replace(RS, "?")') == [],
+    py_writes('x = t.replace(FS, "?").replace(RS, "?")'),
+)
+_w = py_writes('from pathlib import Path\nPath("a.txt").replace("b.txt")')
+check("but Path.replace with one argument still is", len(_w) == 1, _w)
+_w = py_writes('from pathlib import Path\nPath("a").write_text("x")')
+check("and write_text is untouched", len(_w) == 1, _w)
+_w = py_writes('from pathlib import Path\nPath("a").unlink()')
+check("and unlink is untouched", len(_w) == 1, _w)
+
+
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:

@@ -564,6 +564,12 @@ PY_WRITE_CALLS = {
     "shutil.make_archive": 1,
 }
 PY_PATH_METHODS = {"write_text", "write_bytes", "mkdir", "touch", "unlink", "rmdir", "rename", "replace"}
+# `replace` is the one name in that set that a builtin type also owns. `str.replace` and
+# `bytes.replace` are everywhere, and counting them made 17 of 319 published packages look like
+# they write to the working directory when they only rewrite a string. Argument count separates
+# them cleanly: Path.replace takes exactly one target, str.replace takes two or three. Claiming a
+# write that does not happen is worse than missing one, so anything ambiguous is not a write.
+_ARITY_ONLY_PATH_METHOD = {"replace": 1}
 
 
 def _record_py_write(reach, command, path_node):
@@ -673,6 +679,9 @@ def scan_python(src, reach, origin, depth=0):
                     _record_py_write(reach, "open(%s)" % mode, node.args[0] if node.args else None)
             elif tail in PY_PATH_METHODS and isinstance(node.func, ast.Attribute):
                 # pathlib.Path("x").write_text(...) and friends
+                want = _ARITY_ONLY_PATH_METHOD.get(tail)
+                if want is not None and (len(node.args) != want or node.keywords):
+                    continue  # str.replace(old, new), not Path.replace(target)
                 recv = node.func.value
                 inner = None
                 if isinstance(recv, ast.Call) and recv.args:
