@@ -287,6 +287,7 @@ SHELL_KEYWORDS = {
 }
 SHELL_BUILTINS = {
     "alias",
+    "kill",
     "bg",
     "bind",
     "break",
@@ -778,20 +779,75 @@ def _strip_comments(src):
     return "\n".join(out)
 
 
+def _span_end(src, start, closer):
+    """Index of the closer that ends a span opened just before `start`, or -1. Quote aware.
+
+    For ")" a nested "(" deepens and a ")" inside a quoted string does not close; for "`" the
+    first unescaped backtick outside quotes closes.
+    """
+    depth, quote, i, n = 1, None, start, len(src)
+    while i < n:
+        ch = src[i]
+        if ch == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote is not None:
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+        elif closer == ")":
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return i
+        elif ch == closer:
+            return i
+        i += 1
+    return -1
+
+
 def _outer_substitutions(src, truncated):
-    """Yield the body of each outermost `$( ... )` and each backtick span.
+    """Yield the body of each outermost `$( ... )` and each backtick span, quote aware.
 
     A regex cannot do this. `[^()]*` cannot cross a nested paren, so in
     `$(dirname $(readlink -f x))` it matched only the inner span and `dirname` was never read,
     which is a silent miss in the one direction this tool must not have. Only the OUTERMOST span
     is yielded because scanning it recurses back through here and finds the inner ones.
     `$((...))` is arithmetic, not a command, and is skipped.
+
+    Quotes matter twice. Inside single quotes nothing substitutes, so a backtick in a quoted
+    regex is data: `RE='...[`"'"'"']'` had every `|` alternative read as a command. And inside a
+    span a paren in a quoted string does not close it: `$(python3 -c '...open(x)...')` was cut at
+    the first `)` of the python program and the rest of the program read as shell, which invented
+    `import`, `print` and `out.append` across five published Plays.
     """
     i, n = 0, len(src)
+    quote = None
     while i < n:
         ch = src[i]
+        if ch == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote is not None:
+            if ch == quote:
+                quote = None
+                i += 1
+                continue
+            if quote == "'":
+                i += 1
+                continue
+            # inside double quotes `$(` and a backtick still run
+        elif ch in ("'", '"'):
+            quote = ch
+            i += 1
+            continue
         if ch == "`":
-            j = src.find("`", i + 1)
+            j = _span_end(src, i + 1, "`")
             if j < 0:
                 truncated[0] = True
                 return
@@ -802,18 +858,12 @@ def _outer_substitutions(src, truncated):
             if i + 2 < n and src[i + 2] == "(":
                 i += 3  # arithmetic expansion
                 continue
-            depth, j = 1, i + 2
-            while j < n and depth:
-                if src[j] == "(":
-                    depth += 1
-                elif src[j] == ")":
-                    depth -= 1
-                j += 1
-            if depth:
+            j = _span_end(src, i + 2, ")")
+            if j < 0:
                 truncated[0] = True  # unbalanced, refuse to guess, but say so
                 return
-            yield src[i + 2 : j - 1]
-            i = j
+            yield src[i + 2 : j]
+            i = j + 1
             continue
         i += 1
 
@@ -1046,6 +1096,12 @@ def scan_shell(src, reach, origin, depth=0):
                             scan_shell(body, reach, origin + ">embedded sh", depth + 1)
                         collecting = None
                 continue
+            # A comment is not shell and must not feed the quote tracker: an apostrophe in
+            # "A step's stdout is truncated" opened a phantom quote that the real quote of the
+            # `python3 -c '` two lines below then closed, and the whole python program was read
+            # as shell across five published Plays.
+            if not line or line.startswith("#"):
+                continue
             hd = _HEREDOC_RE.search(line)
             if hd:
                 heredoc = hd.group(1)
@@ -1057,8 +1113,6 @@ def scan_shell(src, reach, origin, depth=0):
                 elif open_quote is None:
                     open_quote = q
                     opener = q
-            if not line or line.startswith("#"):
-                continue
             if open_quote is not None and opener is not None:
                 # This line starts an embedded body, for example python3 -c 'first line.
                 # Read the command before the quote, then collect the body and read it in its
@@ -1459,10 +1513,29 @@ def main():
             packages.append(
                 {"ref": ref, "unreadable": True, "warning": "could not read this package: %s" % str(exc)[:80]}
             )
-    gaps = sum(len(p.get("undeclared_but_reached", [])) for p in packages)
-    missing = sum(len(p.get("missing_here", [])) for p in packages)
-    unportable = sum(len(p.get("unportable_paths", [])) for p in packages)
-    unportable_pkgs = sum(1 for p in packages if p.get("unportable_paths"))
+    # An authoring copy at the store root beside its pulled owner/name copy is the same Play read
+    # twice, and a headline that summed both doubled a real finding. The root copy is named as a
+    # duplicate and left out of the totals; its row stays, so nothing read goes unreported.
+    by_name = {}
+    for p in packages:
+        if "/" in p["ref"] and not p.get("unreadable"):
+            by_name.setdefault(p["ref"].rsplit("/", 1)[1], []).append(p)
+    duplicates = []
+    for p in packages:
+        if "/" in p["ref"] or p.get("unreadable"):
+            continue
+        for q in by_name.get(p["ref"], []):
+            if set(q.get("reached", [])) == set(p.get("reached", [])) and set(q.get("declared", [])) == set(
+                p.get("declared", [])
+            ):
+                p["duplicate_of"] = q["ref"]
+                duplicates.append(p["ref"])
+                break
+    counted = [p for p in packages if not p.get("duplicate_of")]
+    gaps = sum(len(p.get("undeclared_but_reached", [])) for p in counted)
+    missing = sum(len(p.get("missing_here", [])) for p in counted)
+    unportable = sum(len(p.get("unportable_paths", [])) for p in counted)
+    unportable_pkgs = sum(1 for p in counted if p.get("unportable_paths"))
 
     # A store with hundreds of Plays produced 172 KB of stdout, which overran the step output
     # capture and made the whole run fail. Totals stay exact; only the per-package detail is
@@ -1505,7 +1578,16 @@ def main():
                 "trimmed": trimmed,
                 "undeclared_total": gaps,
                 "missing_total": missing,
+                "duplicates": duplicates,
                 "packages": packages,
+                **(
+                    {
+                        "warning": "%d package(s) at the store root duplicate a pulled copy of the same Play and are "
+                        "not counted in the totals: %s" % (len(duplicates), ", ".join(duplicates))
+                    }
+                    if duplicates
+                    else {}
+                ),
             }
         )
     )

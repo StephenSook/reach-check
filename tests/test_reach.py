@@ -587,6 +587,63 @@ finally:
 
 
 print()
+print("quoted-bodies: quoted text is data, and a builtin forks nothing")
+# 2026-09-03: a competitor reproduced `kill -0 $$` reported as an undeclared executable (kill is
+# missing from compgen -b's set in SHELL_BUILTINS), and five of Laksh's Plays reported `import`,
+# `print` and `out.append`, because a `$(python3 -c '...')` span was cut at the first `)` inside
+# the python program, and a backtick inside a single-quoted regex read every `|` alternative as a
+# command.
+r = analyze("quoted-bodies")
+check(
+    "the python3 -c body is read as python: its subprocess target is found",
+    "quoted-body-tool" in r["reached"],
+    r["reached"],
+)
+check("commands after the substitution are still read", {"grep", "python3"} <= set(r["reached"]), r["reached"])
+check("printf is a builtin too, so it is not an executable reach", "printf" not in r["reached"], r["reached"])
+check(
+    "python words inside the quoted program are not commands",
+    not ({"import", "print", "out.append", "paths", "path", "out", "for", "subprocess.run"} & set(r["reached"])),
+    r["reached"],
+)
+check(
+    "regex alternatives after a backtick inside single quotes are not commands",
+    not ({"GET", "POST", "PUT", "get", "post", "route"} & set(r["reached"])),
+    r["reached"],
+)
+check("kill is a shell builtin, never an undeclared executable", "kill" not in r["reached"], r["reached"])
+check("no line was skipped as untokenisable, so nothing was read as shell by accident", r["notes"] == [], r["notes"])
+check("kill is in the builtin set that compgen -b names", "kill" in mod.SHELL_BUILTINS)
+
+print()
+print("duplicate copies: an authoring copy at the store root beside its pulled copy counts once")
+_dup = tempfile.mkdtemp()
+try:
+    shutil.copytree(os.path.join(FIX, "shell-nested"), os.path.join(_dup, "shell-nested"))
+    shutil.copytree(os.path.join(FIX, "shell-nested"), os.path.join(_dup, "someone", "shell-nested"))
+    _one = mod.analyze(os.path.join(FIX, "shell-nested"), "someone/shell-nested")
+    _out = subprocess.run(
+        [sys.executable, EXTRACTOR, "all", _dup, "false"], capture_output=True, text=True, timeout=120
+    )
+    _p = json.loads(_out.stdout)
+    check("both copies are read", _p["count"] == 2, _p["count"])
+    check("the root copy is named as a duplicate", _p["duplicates"] == ["shell-nested"], _p["duplicates"])
+    check(
+        "the headline counts the reach once",
+        _p["undeclared_total"] == len(_one["undeclared_but_reached"]) and _p["undeclared_total"] > 0,
+        (_p["undeclared_total"], _one["undeclared_but_reached"]),
+    )
+    check("and the payload says so", "duplicate a pulled copy" in _p.get("warning", ""), _p.get("warning"))
+    _rows = {q["ref"]: q for q in _p["packages"]}
+    check(
+        "the duplicate row still carries its reach, marked",
+        _rows["shell-nested"].get("duplicate_of") == "someone/shell-nested",
+        _rows["shell-nested"].get("duplicate_of"),
+    )
+finally:
+    shutil.rmtree(_dup, ignore_errors=True)
+
+print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:
     for f in FAILURES:

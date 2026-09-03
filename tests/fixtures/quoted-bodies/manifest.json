@@ -1,0 +1,30 @@
+{
+  "name": "quoted-bodies",
+  "description": "Quoted text that is data, not commands: a python3 -c program with parens inside, a backtick inside a single-quoted regex, and a shell builtin that forks nothing.",
+  "metadata": {
+    "runtime_dependencies": {
+      "host_tools": [
+        {
+          "id": "bash",
+          "command": "bash",
+          "required": true
+        },
+        {
+          "id": "python3",
+          "command": "python3",
+          "required": true
+        }
+      ]
+    }
+  },
+  "steps": {
+    "probe": {
+      "type": "process.exec",
+      "argv": [
+        "bash",
+        "@resource{discover.sh}",
+        "$root"
+      ]
+    }
+  }
+}

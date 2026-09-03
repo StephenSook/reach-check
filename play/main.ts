@@ -9,7 +9,7 @@
  *   author: sookra <stephensookra@gmail.com>
  *   url: https://play.modiqo.ai/sookra/reach-check
  * metadata:
- *   version: 0.3.7
+ *   version: 0.3.8
  *   contract:
  *     atomic: true
  *     input:
@@ -29,12 +29,14 @@
  * - job-dependency-audit
  * - audience-play-authors
  * - effect-read-only
+ * - play-hygiene
  * discoverability:
  *   tags:
  *   - domain-rote-plays
  *   - job-dependency-audit
  *   - audience-play-authors
  *   - effect-read-only
+ *   - play-hygiene
  * parameters:
  * - name: play
  *   type: string
