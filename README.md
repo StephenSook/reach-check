@@ -7,7 +7,7 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB.svg?logo=python&logoColor=white)](./play/deps.toml)
 [![stdlib only](https://img.shields.io/badge/dependencies-none-3fb950.svg)](./play/deps.toml)
 [![read only](https://img.shields.io/badge/effects-read_only-3fb950.svg)](#what-it-does-not-do)
-[![Rote Play](https://img.shields.io/badge/Rote-sookra%2Freach--check-6933FF.svg)](https://play.modiqo.ai/sookra/reach-check@0.3.2)
+[![Rote Play](https://img.shields.io/badge/Rote-sookra%2Freach--check-6933FF.svg)](https://play.modiqo.ai/sookra/reach-check)
 
 Built for the [Rote Playoffs](https://modiqo.ai/blog/the-playoffs), Modiqo's Rote and Play hackathon, September 2026.
 
@@ -27,18 +27,18 @@ Every row is checkable by a stranger, with nothing installed but python.
 | **It finds a binary a regex cannot** | [`tests/fixtures/loop-variable`](tests/fixtures/loop-variable) invokes a tool only through a Python loop variable. |
 | **It refuses to read outside a package** | [`tests/fixtures/escaping-resource`](tests/fixtures/escaping-resource) points a resource reference at `/etc/passwd` and is refused. |
 | **It admits what it cannot read** | [`tests/fixtures/javascript-body`](tests/fixtures/javascript-body) is a node body; it is named in `unanalysed_bodies`, not silently skipped. |
-| **The published Play runs** | `rote play run https://play.modiqo.ai/sookra/reach-check@0.3.2 --yes` |
+| **The published Play runs** | `rote play run https://play.modiqo.ai/sookra/reach-check --yes` |
 
 ## Run it
 
 ```bash
-rote play run https://play.modiqo.ai/sookra/reach-check@0.3.2 --yes
+rote play run https://play.modiqo.ai/sookra/reach-check --yes
 ```
 
 Point it at a Play you are still writing, which is the habit it was built for:
 
 ```bash
-rote play run https://play.modiqo.ai/sookra/reach-check@0.3.2 play=/path/to/your-play --yes
+rote play run https://play.modiqo.ai/sookra/reach-check play=/path/to/your-play --yes
 ```
 
 | Parameter | Default | What it does |
