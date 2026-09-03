@@ -364,6 +364,11 @@ FORWARDING = {
     "setsid",
     "ionice",
 }
+# `find . -exec grep -l TODO {} +` runs grep. A tool that reports only `find` has produced a
+# false clean, which is the one failure this whole program exists to avoid.
+FIND_EXEC = {"find"}
+_FIND_EXEC_FLAGS = {"-exec", "-execdir", "-ok", "-okdir"}
+
 _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
@@ -764,17 +769,59 @@ def _strip_comments(src):
     return "\n".join(out)
 
 
-_CMDSUB_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+def _outer_substitutions(src, truncated):
+    """Yield the body of each outermost `$( ... )` and each backtick span.
+
+    A regex cannot do this. `[^()]*` cannot cross a nested paren, so in
+    `$(dirname $(readlink -f x))` it matched only the inner span and `dirname` was never read,
+    which is a silent miss in the one direction this tool must not have. Only the OUTERMOST span
+    is yielded because scanning it recurses back through here and finds the inner ones.
+    `$((...))` is arithmetic, not a command, and is skipped.
+    """
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch == "`":
+            j = src.find("`", i + 1)
+            if j < 0:
+                truncated[0] = True
+                return
+            yield src[i + 1 : j]
+            i = j + 1
+            continue
+        if ch == "$" and i + 1 < n and src[i + 1] == "(":
+            if i + 2 < n and src[i + 2] == "(":
+                i += 3  # arithmetic expansion
+                continue
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if src[j] == "(":
+                    depth += 1
+                elif src[j] == ")":
+                    depth -= 1
+                j += 1
+            if depth:
+                truncated[0] = True  # unbalanced, refuse to guess, but say so
+                return
+            yield src[i + 2 : j - 1]
+            i = j
+            continue
+        i += 1
 
 
 def _scan_substitutions(src, reach, origin, depth):
     """A command substitution runs a command. Read what is inside it."""
     if depth > 4:
         return
-    for mo in _CMDSUB_RE.finditer(src):
-        inner = mo.group(1) if mo.group(1) is not None else mo.group(2)
+    truncated = [False]
+    for inner in _outer_substitutions(src, truncated):
         if inner and inner.strip():
             scan_shell(inner, reach, origin + ">substitution", depth + 1)
+    if truncated[0]:
+        reach.notes.append(
+            "an unbalanced command substitution in %s stopped the read partway, so the "
+            "commands after it were not examined" % origin
+        )
 
 
 def _tokens(text):
@@ -810,10 +857,58 @@ def _case_label_cut(toks):
     return -1
 
 
+def _elide_substitutions(toks):
+    """Remove `$( ... )` spans and turn leftover punctuation back into separators.
+
+    shlex with punctuation_chars lexes `d=$(mktemp -d); rm -rf "$d"` as
+    ['d=$', '(', 'mktemp', '-d', ');', 'rm', ...]. `);` is not in _SEPS, so the line stayed one
+    segment and the scanner abandoned it at the paren: every command after a substitution on the
+    same line went unreported, which is a false clean on an ordinary shell idiom. The body of the
+    substitution is already read by _scan_substitutions, so the span is dropped here rather than
+    read twice.
+
+    Only `$( ... )` is touched. A plain `( ... )` is left byte for byte as it was, because turning
+    those parens into separators made the scanner read case-branch labels and Python expressions
+    inside embedded source as commands: across 319 published packages it invented `HEAD`,
+    `branch`, `detached`, `parts` and `x.strip`. A subshell's contents therefore still go unread,
+    which is a miss rather than an invention, and a false positive is the worse of the two.
+    """
+    out, sub_depth = [], 0
+    for t in toks:
+        if not t:
+            continue
+        if set(t) <= {"(", ")", ";"}:
+            keep = ""
+            for ch in t:
+                if ch == "(":
+                    if sub_depth or (out and out[-1].endswith("$")):
+                        sub_depth += 1
+                    else:
+                        keep += ch  # a plain paren, left exactly as it was
+                elif ch == ")":
+                    if sub_depth:
+                        sub_depth -= 1
+                    else:
+                        keep += ch
+                elif not sub_depth:
+                    if keep:
+                        out.append(keep)
+                        keep = ""
+                    out.append(";")
+            if keep:
+                out.append(keep)
+            continue
+        if sub_depth:
+            continue
+        out.append(t)
+    return out
+
+
 def _scan_tokens(toks, reach, origin, depth):
     cut = _case_label_cut(toks)
     if cut >= 0:
         toks = toks[cut + 1 :]
+    toks = _elide_substitutions(toks)
     segs, cur = [], []
     for t in toks:
         if t in _SEPS:
@@ -857,10 +952,26 @@ def _scan_tokens(toks, reach, origin, depth):
                 seg = seg[1:]
             head = seg[0] if seg else ""
             hops += 1
+        # `trap 'rm -f "$tmp"' EXIT` carries a real command inside a quoted body. trap is a
+        # shell builtin, so the filter below drops the whole segment, and a cleanup handler is
+        # exactly where a destructive command hides.
+        if os.path.basename(head) == "trap" and len(seg) > 1 and depth <= 4:
+            scan_shell(seg[1], reach, origin + ">trap", depth + 1)
         if not seg or not plausible_command(head):
             continue
         base = os.path.basename(head)
         reach.execs.add(base)
+        if base in FIND_EXEC and depth <= 4:
+            for _i, _t in enumerate(seg):
+                if _t not in _FIND_EXEC_FLAGS:
+                    continue
+                sub = []
+                for u in seg[_i + 1 :]:
+                    if u == "+":
+                        break
+                    sub.append(u)
+                if sub:
+                    _scan_tokens(sub, reach, origin + ">" + base + " " + _t, depth + 1)
         if base in WRITE_CMDS:
             _classify_write(base, seg, reach)
         if PY_INTERP.match(base) and "-c" in seg:

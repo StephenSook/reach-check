@@ -466,6 +466,62 @@ finally:
         os.chmod(os.path.join(_t, "resources", "scripts"), 0o755)
     shutil.rmtree(_t, ignore_errors=True)
 
+# ---------------------------------------------------------------------------
+# A command that is reached but not reported is a false clean, which is the one
+# failure this tool exists to prevent. These four shapes each hid a real command.
+# Found after a competitor described the same two under-reports in their own tool;
+# testing ours against the shapes they named turned up a third that was wider than
+# either. Every positive has a negative control beside it, because the cheap way to
+# pass an under-reporting test is to start reporting everything.
+print()
+print("commands that were reaching but not reported")
+
+_c = shell_execs("""d=$(mktemp -d); rm -rf "$d"\n""")
+check("a command after a substitution on the same line is read", "rm" in _c, sorted(_c))
+check("and the substitution's own command is still read", "mktemp" in _c, sorted(_c))
+
+_c = shell_execs("""v=hello; curl -s https://example.com\n""")
+check("the same line without a substitution is unchanged", _c == {"curl"}, sorted(_c))
+
+_c = shell_execs("""a=$(dirname $(readlink -f x)); curl y\n""")
+check("a nested substitution reads the outer command too", "dirname" in _c, sorted(_c))
+check("and the inner one", "readlink" in _c, sorted(_c))
+
+_c = shell_execs("""n=$((1 + 2)); curl y\n""")
+check("arithmetic expansion is not read as a command", _c == {"curl"}, sorted(_c))
+
+_r = mod.Reach()
+mod.scan_shell("""v=$(mktemp; curl y""", _r, "test")
+check(
+    "an unbalanced substitution says so rather than going quiet",
+    any("unbalanced" in n for n in _r.notes),
+    _r.notes,
+)
+
+_c = shell_execs("""l=$(mktemp); trap 'rm -f "$l"' EXIT\n""")
+check("a command inside a trap handler is read", "rm" in _c, sorted(_c))
+_c = shell_execs("""trap 'rm -rf "$workdir"' EXIT\n""")
+check("including a destructive one, which is the point", _c == {"rm"}, sorted(_c))
+_c = shell_execs("""trap - EXIT\n""")
+check("and a trap that clears a handler invents nothing", _c == set(), sorted(_c))
+
+_c = shell_execs("""find . -name '*.py' -exec grep -l TODO {} +\n""")
+check("the command after find -exec is read", "grep" in _c, sorted(_c))
+_c = shell_execs("""find . -type f -exec chmod 600 {} \\;\n""")
+check("in the semicolon-terminated form as well", "chmod" in _c, sorted(_c))
+_c = shell_execs("""find . -name '*.py' -print\n""")
+check("and find without -exec adds nothing", _c == {"find"}, sorted(_c))
+
+# A plain `( ... )` is left exactly as it was. Its commands already read correctly, because the
+# paren is treated as a grammar word. Turning those parens into separators instead, which an
+# earlier version of this fix did, invented `HEAD`, `branch`, `detached`, `parts` and `x.strip`
+# out of case labels and embedded Python across 319 published packages.
+_c = shell_execs("""(curl x && rm -rf y)\n""")
+check("a plain subshell's commands are read, both of them", _c == {"curl", "rm"}, sorted(_c))
+_c = shell_execs("""case "$v" in\n  HEAD|branch) printf p ;;\nesac\n""")
+check("a case label is not read as a command", _c == set(), sorted(_c))
+
+
 print()
 print("%d checks, %d failed" % (CHECKS, len(FAILURES)))
 if FAILURES:
